@@ -1,0 +1,994 @@
+"""Main window – KiCad-like single-toolbar interface.
+
+Structure
+---------
+* **Toolbar** with all primary actions (no duplicate menus).
+* **Left dock** – Library browser (footprint tree + search).
+* **Centre** – PCB canvas (QGraphicsView with photo overlays and footprints).
+* **Right dock** – Properties panel (selected component) + Component list.
+* **Status bar** – library counts, hints.
+
+Dialogs
+-------
+* PathSettingsDialog – configure KiCad library paths.
+* SymbolBrowserDialog – browse and pick a symbol to link.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtCore import Qt, QPointF, Signal, QTimer
+from PySide6.QtGui import QAction, QKeySequence, QWheelEvent, QIcon
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QInputDialog,
+    QDockWidget,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGraphicsScene,
+    QGraphicsView,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QSpinBox,
+    QStatusBar,
+    QTabWidget,
+    QTextEdit,
+    QToolBar,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from coordinate_system import CoordinateSystem
+from footprint_item import FootprintItem
+from image_engine import ImageEngine
+from kicad_project import KiCadProjectManager
+from library_bridge import LibraryBridge
+from project_manager import save_project, load_project
+
+
+# ====================================================================
+# Zoomable graphics view
+# ====================================================================
+
+class PcbGraphicsView(QGraphicsView):
+    zoom_changed = Signal(float)
+
+    def __init__(self, scene: QGraphicsScene, parent=None) -> None:
+        super().__init__(scene, parent)
+        self.setRenderHints(
+            self.renderHints()
+            | self.renderHints().__class__.Antialiasing
+            | self.renderHints().__class__.SmoothPixmapTransform
+        )
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self._zoom: float = 1.0
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
+        self._zoom *= factor
+        self.scale(factor, factor)
+        self.zoom_changed.emit(self._zoom)
+
+
+# ====================================================================
+# Library browser (left dock)
+# ====================================================================
+
+class LibraryBrowserWidget(QWidget):
+    """Tree-based browser for footprint and symbol libraries."""
+
+    footprint_activated = Signal(str)  # full_name to place
+    symbol_activated = Signal(str)     # full_name to link
+
+    def __init__(self, library: LibraryBridge, parent=None) -> None:
+        super().__init__(parent)
+        self._lib = library
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        # Mode tabs
+        self._tabs = QTabWidget()
+        layout.addWidget(self._tabs)
+
+        # -- Footprint tab --
+        fp_w = QWidget()
+        fp_lay = QVBoxLayout(fp_w)
+        fp_lay.setContentsMargins(2, 2, 2, 2)
+        self._fp_search = QLineEdit()
+        self._fp_search.setPlaceholderText("Search footprints…")
+        self._fp_search.textChanged.connect(self._filter_fp_tree)
+        fp_lay.addWidget(self._fp_search)
+        self._fp_tree = QTreeWidget()
+        self._fp_tree.setHeaderLabels(["Footprint Libraries"])
+        self._fp_tree.itemDoubleClicked.connect(self._on_fp_double_click)
+        fp_lay.addWidget(self._fp_tree)
+        self._btn_place_fp = QPushButton("Place on PCB")
+        self._btn_place_fp.clicked.connect(self._on_place_fp)
+        fp_lay.addWidget(self._btn_place_fp)
+        self._tabs.addTab(fp_w, "Footprints")
+
+        # -- Symbol tab --
+        sym_w = QWidget()
+        sym_lay = QVBoxLayout(sym_w)
+        sym_lay.setContentsMargins(2, 2, 2, 2)
+        self._sym_search = QLineEdit()
+        self._sym_search.setPlaceholderText("Search symbols…")
+        self._sym_search.textChanged.connect(self._filter_sym_tree)
+        sym_lay.addWidget(self._sym_search)
+        self._sym_tree = QTreeWidget()
+        self._sym_tree.setHeaderLabels(["Symbol Libraries"])
+        self._sym_tree.itemDoubleClicked.connect(self._on_sym_double_click)
+        sym_lay.addWidget(self._sym_tree)
+        self._tabs.addTab(sym_w, "Symbols")
+
+    # ---- Population ----
+
+    def populate(self) -> None:
+        self._populate_fp_tree()
+        self._populate_sym_tree()
+
+    def _populate_fp_tree(self) -> None:
+        self._fp_tree.clear()
+        for lib in self._lib.all_footprint_libraries():
+            parent = QTreeWidgetItem([lib])
+            parent.setData(0, Qt.ItemDataRole.UserRole, None)
+            for fp in self._lib.footprints_in(lib):
+                child = QTreeWidgetItem([fp.name])
+                child.setData(0, Qt.ItemDataRole.UserRole, fp.full_name)
+                parent.addChild(child)
+            self._fp_tree.addTopLevelItem(parent)
+
+    def _populate_sym_tree(self) -> None:
+        self._sym_tree.clear()
+        for lib in self._lib.all_symbol_libraries():
+            parent = QTreeWidgetItem([lib])
+            parent.setData(0, Qt.ItemDataRole.UserRole, None)
+            for sym in self._lib.symbols_in(lib):
+                child = QTreeWidgetItem([sym.name])
+                child.setData(0, Qt.ItemDataRole.UserRole, sym.full_name)
+                parent.addChild(child)
+            self._sym_tree.addTopLevelItem(parent)
+
+    # ---- Filtering ----
+
+    def _filter_fp_tree(self, text: str) -> None:
+        self._filter_tree(self._fp_tree, text)
+
+    def _filter_sym_tree(self, text: str) -> None:
+        self._filter_tree(self._sym_tree, text)
+
+    @staticmethod
+    def _filter_tree(tree: QTreeWidget, text: str) -> None:
+        text = text.strip().lower()
+        for i in range(tree.topLevelItemCount()):
+            lib_item = tree.topLevelItem(i)
+            if lib_item is None:
+                continue
+            any_visible = False
+            for j in range(lib_item.childCount()):
+                child = lib_item.child(j)
+                if child is None:
+                    continue
+                match = not text or text in child.text(0).lower()
+                child.setHidden(not match)
+                if match:
+                    any_visible = True
+            lib_item.setHidden(not any_visible)
+            if any_visible and text:
+                lib_item.setExpanded(True)
+
+    # ---- Signals ----
+
+    def _selected_fp_name(self) -> Optional[str]:
+        items = self._fp_tree.selectedItems()
+        if items:
+            return items[0].data(0, Qt.ItemDataRole.UserRole)
+        return None
+
+    def _on_fp_double_click(self, item: QTreeWidgetItem, _col: int) -> None:
+        name = item.data(0, Qt.ItemDataRole.UserRole)
+        if name:
+            self.footprint_activated.emit(name)
+
+    def _on_place_fp(self) -> None:
+        name = self._selected_fp_name()
+        if name:
+            self.footprint_activated.emit(name)
+
+    def _on_sym_double_click(self, item: QTreeWidgetItem, _col: int) -> None:
+        name = item.data(0, Qt.ItemDataRole.UserRole)
+        if name:
+            self.symbol_activated.emit(name)
+
+
+# ====================================================================
+# Properties panel (right dock)
+# ====================================================================
+
+class PropertiesPanel(QWidget):
+    """Edit properties of the selected component."""
+
+    property_changed = Signal()
+    link_symbol_requested = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._current: Optional[FootprintItem] = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        grp = QGroupBox("Component Properties")
+        form = QFormLayout(grp)
+
+        self._ref = QLineEdit()
+        self._ref.editingFinished.connect(self._apply)
+        form.addRow("Reference:", self._ref)
+
+        self._val = QLineEdit()
+        self._val.editingFinished.connect(self._apply)
+        form.addRow("Value:", self._val)
+
+        self._fp_lbl = QLabel("—")
+        self._fp_lbl.setWordWrap(True)
+        form.addRow("Footprint:", self._fp_lbl)
+
+        self._sym_lbl = QLabel("—")
+        self._sym_lbl.setWordWrap(True)
+        form.addRow("Symbol:", self._sym_lbl)
+
+        self._btn_link = QPushButton("Link Symbol…")
+        self._btn_link.clicked.connect(self.link_symbol_requested.emit)
+        form.addRow("", self._btn_link)
+
+        self._layer = QComboBox()
+        self._layer.addItems(["F.Cu", "B.Cu"])
+        self._layer.currentTextChanged.connect(self._apply)
+        form.addRow("Layer:", self._layer)
+
+        self._rot = QDoubleSpinBox()
+        self._rot.setRange(0, 359.99)
+        self._rot.setSuffix("°")
+        self._rot.setDecimals(2)
+        self._rot.editingFinished.connect(self._apply)
+        form.addRow("Rotation:", self._rot)
+
+        layout.addWidget(grp)
+
+        # Image controls
+        img_grp = QGroupBox("Image Layers")
+        img_lay = QVBoxLayout(img_grp)
+
+        self._chk_top = QCheckBox("Top layer visible")
+        self._chk_top.setChecked(True)
+        img_lay.addWidget(self._chk_top)
+
+        self._chk_bot = QCheckBox("Bottom layer visible")
+        self._chk_bot.setChecked(True)
+        img_lay.addWidget(self._chk_bot)
+
+        img_lay.addWidget(QLabel("Bottom opacity:"))
+        self._opacity = QSlider(Qt.Orientation.Horizontal)
+        self._opacity.setRange(0, 100)
+        self._opacity.setValue(50)
+        img_lay.addWidget(self._opacity)
+
+        self._chk_mirror = QCheckBox("Mirror bottom")
+        img_lay.addWidget(self._chk_mirror)
+
+        layout.addWidget(img_grp)
+        layout.addStretch()
+
+    # Public helpers exposed for MainWindow
+    @property
+    def chk_top(self) -> QCheckBox:
+        return self._chk_top
+
+    @property
+    def chk_bot(self) -> QCheckBox:
+        return self._chk_bot
+
+    @property
+    def opacity_slider(self) -> QSlider:
+        return self._opacity
+
+    @property
+    def chk_mirror(self) -> QCheckBox:
+        return self._chk_mirror
+
+    def set_component(self, fp: Optional[FootprintItem]) -> None:
+        self._current = fp
+        enabled = fp is not None
+        self._ref.setEnabled(enabled)
+        self._val.setEnabled(enabled)
+        self._layer.setEnabled(enabled)
+        self._rot.setEnabled(enabled)
+        self._btn_link.setEnabled(enabled)
+
+        if fp:
+            self._ref.setText(fp.reference)
+            self._val.setText(fp.value)
+            self._fp_lbl.setText(fp.footprint_full_name)
+            self._sym_lbl.setText(fp.symbol_full_name or "— not linked —")
+            self._layer.setCurrentText(fp.layer)
+            self._rot.setValue(fp.rotation_deg)
+        else:
+            self._ref.clear()
+            self._val.clear()
+            self._fp_lbl.setText("—")
+            self._sym_lbl.setText("—")
+            self._rot.setValue(0)
+
+    def _apply(self) -> None:
+        fp = self._current
+        if not fp:
+            return
+        fp.set_reference(self._ref.text())
+        fp.set_value(self._val.text())
+        fp.layer = self._layer.currentText()
+        fp.set_rotation(self._rot.value())
+        self.property_changed.emit()
+
+
+# ====================================================================
+# Component list widget
+# ====================================================================
+
+class ComponentListWidget(QWidget):
+    component_selected = Signal(str)   # uid
+    delete_requested = Signal(str)     # uid
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(QLabel("<b>Placed Components</b>"))
+        self._list = QListWidget()
+        self._list.currentItemChanged.connect(self._on_select)
+        layout.addWidget(self._list)
+        self._btn_del = QPushButton("Remove Selected")
+        self._btn_del.clicked.connect(self._on_delete)
+        layout.addWidget(self._btn_del)
+
+    def refresh(self, items: list[FootprintItem]) -> None:
+        self._list.clear()
+        for fp in items:
+            sym = f" ↔ {fp.symbol_full_name}" if fp.symbol_full_name else ""
+            text = f"{fp.reference}  ({fp.footprint_name}){sym}"
+            li = QListWidgetItem(text)
+            li.setData(Qt.ItemDataRole.UserRole, fp.uid)
+            self._list.addItem(li)
+
+    def _on_select(self, current: QListWidgetItem | None, _prev) -> None:
+        if current:
+            self.component_selected.emit(current.data(Qt.ItemDataRole.UserRole))
+
+    def _on_delete(self) -> None:
+        cur = self._list.currentItem()
+        if cur:
+            self.delete_requested.emit(cur.data(Qt.ItemDataRole.UserRole))
+
+
+# ====================================================================
+# Path settings dialog
+# ====================================================================
+
+class PathSettingsDialog(QDialog):
+    def __init__(self, library: LibraryBridge, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("KiCad Library Paths")
+        self.resize(600, 400)
+        self._lib = library
+
+        layout = QVBoxLayout(self)
+
+        # KiCad base
+        base = library.kicad_base
+        layout.addWidget(QLabel(f"<b>KiCad 9 detected:</b> {base or 'NOT FOUND'}"))
+
+        # Footprint paths
+        layout.addWidget(QLabel("<b>Footprint library paths:</b>"))
+        self._fp_edit = QTextEdit()
+        self._fp_edit.setPlainText("\n".join(str(p) for p in library.footprint_paths))
+        layout.addWidget(self._fp_edit)
+        btn_fp = QPushButton("Add Footprint Path…")
+        btn_fp.clicked.connect(lambda: self._add_path(self._fp_edit))
+        layout.addWidget(btn_fp)
+
+        # Symbol paths
+        layout.addWidget(QLabel("<b>Symbol library paths:</b>"))
+        self._sym_edit = QTextEdit()
+        self._sym_edit.setPlainText("\n".join(str(p) for p in library.symbol_paths))
+        layout.addWidget(self._sym_edit)
+        btn_sym = QPushButton("Add Symbol Path…")
+        btn_sym.clicked.connect(lambda: self._add_path(self._sym_edit))
+        layout.addWidget(btn_sym)
+
+        # Buttons
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    def _add_path(self, edit: QTextEdit) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Select Library Directory")
+        if d:
+            cur = edit.toPlainText().strip()
+            edit.setPlainText(f"{cur}\n{d}" if cur else d)
+
+    def footprint_paths(self) -> list[str]:
+        return [l.strip() for l in self._fp_edit.toPlainText().splitlines() if l.strip()]
+
+    def symbol_paths(self) -> list[str]:
+        return [l.strip() for l in self._sym_edit.toPlainText().splitlines() if l.strip()]
+
+
+# ====================================================================
+# Symbol browser dialog
+# ====================================================================
+
+class SymbolBrowserDialog(QDialog):
+    def __init__(self, library: LibraryBridge, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Link Symbol")
+        self.resize(500, 500)
+        self._lib = library
+        self._selected: Optional[str] = None
+
+        layout = QVBoxLayout(self)
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Search symbols…")
+        self._search.textChanged.connect(self._filter)
+        layout.addWidget(self._search)
+
+        self._tree = QTreeWidget()
+        self._tree.setHeaderLabels(["Symbol Libraries"])
+        self._tree.itemDoubleClicked.connect(self._on_double_click)
+        layout.addWidget(self._tree)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(self._confirm)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+        self._populate()
+
+    def _populate(self) -> None:
+        for lib in self._lib.all_symbol_libraries():
+            parent = QTreeWidgetItem([lib])
+            for sym in self._lib.symbols_in(lib):
+                child = QTreeWidgetItem([sym.name])
+                child.setData(0, Qt.ItemDataRole.UserRole, sym.full_name)
+                parent.addChild(child)
+            self._tree.addTopLevelItem(parent)
+
+    def _filter(self, text: str) -> None:
+        text = text.strip().lower()
+        for i in range(self._tree.topLevelItemCount()):
+            lib_item = self._tree.topLevelItem(i)
+            if lib_item is None:
+                continue
+            any_vis = False
+            for j in range(lib_item.childCount()):
+                child = lib_item.child(j)
+                if child is None:
+                    continue
+                match = not text or text in child.text(0).lower()
+                child.setHidden(not match)
+                if match:
+                    any_vis = True
+            lib_item.setHidden(not any_vis)
+            if any_vis and text:
+                lib_item.setExpanded(True)
+
+    def _on_double_click(self, item: QTreeWidgetItem, _col: int) -> None:
+        name = item.data(0, Qt.ItemDataRole.UserRole)
+        if name:
+            self._selected = name
+            self.accept()
+
+    def _confirm(self) -> None:
+        items = self._tree.selectedItems()
+        if items:
+            name = items[0].data(0, Qt.ItemDataRole.UserRole)
+            if name:
+                self._selected = name
+        self.accept()
+
+    def selected_symbol(self) -> Optional[str]:
+        return self._selected
+
+
+# ====================================================================
+# Main Window
+# ====================================================================
+
+class MainWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("PCB → KiCad  –  Reverse Engineering Tool")
+        self.resize(1500, 950)
+
+        # Core objects
+        self._coord = CoordinateSystem(pixels_per_mm=10.0)
+        self._scene = QGraphicsScene(self)
+        self._image_engine = ImageEngine(self._scene)
+        self._library = LibraryBridge()
+        self._footprints: list[FootprintItem] = []
+        self._project_path: Optional[str] = None
+
+        # Central canvas
+        self._view = PcbGraphicsView(self._scene)
+        self.setCentralWidget(self._view)
+
+        # Left dock – library browser
+        self._lib_browser = LibraryBrowserWidget(self._library)
+        lib_dock = QDockWidget("Library Browser", self)
+        lib_dock.setWidget(self._lib_browser)
+        lib_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, lib_dock)
+
+        # Right dock – properties + component list
+        right_w = QWidget()
+        right_lay = QVBoxLayout(right_w)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+
+        self._props = PropertiesPanel()
+        right_lay.addWidget(self._props)
+
+        self._comp_list = ComponentListWidget()
+        right_lay.addWidget(self._comp_list)
+
+        right_dock = QDockWidget("Properties", self)
+        right_dock.setWidget(right_w)
+        right_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right_dock)
+
+        # Toolbar
+        self._create_toolbar()
+
+        # Status bar
+        self._status = QStatusBar()
+        self.setStatusBar(self._status)
+        self._status.showMessage("Initialising…")
+
+        # Wire signals
+        self._wire_signals()
+
+        # Initial library scan (deferred to not block UI)
+        QTimer.singleShot(100, self._initial_scan)
+
+    # ------------------------------------------------------------------
+    # Toolbar (single, no duplicate menu)
+    # ------------------------------------------------------------------
+
+    def _create_toolbar(self) -> None:
+        tb = QToolBar("Main", self)
+        tb.setMovable(False)
+        tb.setIconSize(tb.iconSize())
+        self.addToolBar(tb)
+
+        # File operations
+        tb.addAction("New", self._on_new)
+        tb.addAction("Open", self._on_open_project)
+        tb.addAction("Save", self._on_save_project)
+        tb.addSeparator()
+
+        # Photos
+        tb.addAction("Top Photo", self._on_load_top)
+        tb.addAction("Bottom Photo", self._on_load_bottom)
+        tb.addSeparator()
+
+        # Components
+        tb.addAction("Place Footprint", self._on_place_from_browser)
+        tb.addAction("Link Symbol", self._on_link_symbol)
+        tb.addSeparator()
+
+        # Nets
+        self._act_connect_nets = tb.addAction("Connect Nets", self._on_toggle_connect_mode)
+        self._act_connect_nets.setCheckable(True)
+        tb.addSeparator()
+
+        # Export
+        tb.addAction("Export KiCad 9 Project", self._on_export_project)
+        tb.addSeparator()
+
+        # Settings
+        tb.addAction("Library Paths", self._on_settings)
+
+    # ------------------------------------------------------------------
+    # Signal wiring
+    # ------------------------------------------------------------------
+
+    def _wire_signals(self) -> None:
+        self._lib_browser.footprint_activated.connect(self._on_add_footprint)
+        self._comp_list.component_selected.connect(self._on_select_component)
+        self._comp_list.delete_requested.connect(self._on_delete_component)
+        self._props.property_changed.connect(self._on_property_changed)
+        self._props.link_symbol_requested.connect(self._on_link_symbol)
+        self._connect_mode: bool = False
+
+        # Image layer controls
+        self._props.chk_top.toggled.connect(
+            lambda v: self._image_engine.top().set_visible(v))
+        self._props.chk_bot.toggled.connect(
+            lambda v: self._image_engine.bottom().set_visible(v))
+        self._props.opacity_slider.valueChanged.connect(
+            lambda v: self._image_engine.bottom().set_opacity(v / 100.0))
+        self._props.chk_mirror.toggled.connect(
+            lambda v: self._image_engine.bottom().set_mirrored(v))
+
+    # ------------------------------------------------------------------
+    # Library scan
+    # ------------------------------------------------------------------
+
+    def _initial_scan(self) -> None:
+        fp_count, sym_count = self._library.scan()
+        self._lib_browser.populate()
+        if fp_count or sym_count:
+            self._status.showMessage(
+                f"Libraries: {fp_count} footprints, {sym_count} symbols  |  "
+                f"KiCad base: {self._library.kicad_base or 'not found'}")
+        else:
+            self._status.showMessage(
+                "No KiCad libraries found. Use 'Library Paths' to configure.")
+
+    # ------------------------------------------------------------------
+    # File slots
+    # ------------------------------------------------------------------
+
+    def _on_new(self) -> None:
+        if self._footprints:
+            reply = QMessageBox.question(
+                self, "New Project",
+                "Discard current work?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        for fp in self._footprints:
+            self._scene.removeItem(fp)
+        self._footprints.clear()
+        self._comp_list.refresh(self._footprints)
+        self._props.set_component(None)
+        self._project_path = None
+        self._status.showMessage("New project created.")
+
+    def _on_open_project(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Project", "", "PCB-to-KiCad Project (*.p2k)")
+        if not path:
+            return
+        try:
+            data = load_project(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Open Error", str(exc))
+            return
+
+        # Clear current
+        for fp in self._footprints:
+            self._scene.removeItem(fp)
+        self._footprints.clear()
+
+        # Apply settings
+        settings = data.get("settings", {})
+        self._coord.pixels_per_mm = settings.get("pixels_per_mm", 10.0)
+        off = settings.get("origin_offset_mm", [0, 0])
+        self._coord.origin_offset_mm = (off[0], off[1])
+
+        fp_paths = settings.get("footprint_paths", [])
+        sym_paths = settings.get("symbol_paths", [])
+        if fp_paths:
+            self._library.set_footprint_paths(fp_paths)
+        if sym_paths:
+            self._library.set_symbol_paths(sym_paths)
+        self._library.scan()
+        self._lib_browser.populate()
+
+        # Load images
+        images = data.get("images", {})
+        if images.get("top"):
+            self._image_engine.load_top(images["top"])
+        if images.get("bottom"):
+            self._image_engine.load_bottom(images["bottom"])
+
+        # Recreate components
+        for cd in data.get("components", []):
+            fp_name = f"{cd['footprint_lib']}:{cd['footprint_name']}"
+            fp_data = self._library.parse_footprint(fp_name)
+            item = FootprintItem(
+                footprint_data=fp_data,
+                footprint_lib=cd["footprint_lib"],
+                footprint_name=cd["footprint_name"],
+                reference=cd.get("reference", "REF**"),
+                value=cd.get("value", "VAL**"),
+                symbol_lib=cd.get("symbol_lib", ""),
+                symbol_name=cd.get("symbol_name", ""),
+                pixels_per_mm=self._coord.pixels_per_mm,
+            )
+            item.layer = cd.get("layer", "F.Cu")
+            item.set_rotation(cd.get("rotation", 0))
+            item.setPos(cd.get("x_px", 0), cd.get("y_px", 0))
+            for pad_num, net_name in cd.get("pad_nets", {}).items():
+                item.set_pad_net(pad_num, net_name)
+            item.signals.pad_clicked.connect(self._on_pad_clicked)
+            self._scene.addItem(item)
+            self._footprints.append(item)
+
+        self._comp_list.refresh(self._footprints)
+        self._project_path = path
+        self._status.showMessage(f"Opened: {path}")
+
+    def _on_save_project(self) -> None:
+        if not self._project_path:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Project", "project.p2k", "PCB-to-KiCad Project (*.p2k)")
+            if not path:
+                return
+            self._project_path = path
+
+        comps = [fp.to_dict() for fp in self._footprints]
+        top_img = ""
+        bot_img = ""
+        # Try to recover image paths (stored in ImageEngine if available)
+        try:
+            top_img = str(getattr(self._image_engine.top(), '_source_path', '')) or ""
+            bot_img = str(getattr(self._image_engine.bottom(), '_source_path', '')) or ""
+        except Exception:
+            pass
+
+        try:
+            save_project(
+                self._project_path,
+                footprint_paths=[str(p) for p in self._library.footprint_paths],
+                symbol_paths=[str(p) for p in self._library.symbol_paths],
+                pixels_per_mm=self._coord.pixels_per_mm,
+                origin_offset=self._coord.origin_offset_mm,
+                top_image=top_img,
+                bottom_image=bot_img,
+                components=comps,
+            )
+            self._status.showMessage(f"Saved: {self._project_path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Save Error", str(exc))
+
+    # ------------------------------------------------------------------
+    # Photo slots
+    # ------------------------------------------------------------------
+
+    def _image_filter(self) -> str:
+        return "Images (*.png *.jpg *.jpeg *.bmp *.tiff *.tif)"
+
+    def _on_load_top(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Top Photo", "", self._image_filter())
+        if path:
+            if self._image_engine.load_top(path):
+                self._status.showMessage(f"Top layer: {Path(path).name}")
+                self._view.fitInView(
+                    self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+            else:
+                QMessageBox.warning(self, "Error", f"Failed to load: {path}")
+
+    def _on_load_bottom(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Bottom Photo", "", self._image_filter())
+        if path:
+            if self._image_engine.load_bottom(path):
+                self._status.showMessage(f"Bottom layer: {Path(path).name}")
+            else:
+                QMessageBox.warning(self, "Error", f"Failed to load: {path}")
+
+    # ------------------------------------------------------------------
+    # Component placement
+    # ------------------------------------------------------------------
+
+    def _on_add_footprint(self, full_name: str) -> None:
+        """Place a real footprint on the canvas at the viewport centre."""
+        fp_data = self._library.parse_footprint(full_name)
+        info = self._library.get_footprint(full_name)
+        if not info:
+            QMessageBox.warning(self, "Error", f"Footprint not found: {full_name}")
+            return
+
+        centre = self._view.mapToScene(self._view.viewport().rect().center())
+
+        # Auto-increment reference
+        prefix = self._guess_prefix(info.library)
+        num = sum(1 for f in self._footprints
+                  if f.reference.startswith(prefix)) + 1
+
+        item = FootprintItem(
+            footprint_data=fp_data,
+            footprint_lib=info.library,
+            footprint_name=info.name,
+            reference=f"{prefix}{num}",
+            value=info.name,
+            pixels_per_mm=self._coord.pixels_per_mm,
+        )
+        item.setPos(centre)
+        item.signals.pad_clicked.connect(self._on_pad_clicked)
+        item.connect_mode = self._connect_mode
+        self._scene.addItem(item)
+        self._footprints.append(item)
+        self._comp_list.refresh(self._footprints)
+        self._props.set_component(item)
+        self._status.showMessage(f"Placed {item.reference} ({info.full_name})")
+
+    def _on_place_from_browser(self) -> None:
+        """Toolbar action: place whatever is selected in the footprint browser."""
+        name = self._lib_browser._selected_fp_name()
+        if name:
+            self._on_add_footprint(name)
+        else:
+            self._status.showMessage("Select a footprint in the library browser first.")
+
+    @staticmethod
+    def _guess_prefix(library: str) -> str:
+        ll = library.lower()
+        if "resistor" in ll:
+            return "R"
+        if "capacitor" in ll:
+            return "C"
+        if "inductor" in ll:
+            return "L"
+        if "diode" in ll or "led" in ll:
+            return "D"
+        if "connector" in ll:
+            return "J"
+        if "crystal" in ll or "oscillator" in ll:
+            return "Y"
+        if "transistor" in ll:
+            return "Q"
+        return "U"
+
+    # ------------------------------------------------------------------
+    # Symbol linking
+    # ------------------------------------------------------------------
+
+    def _on_link_symbol(self) -> None:
+        fp = self._selected_footprint()
+        if not fp:
+            self._status.showMessage("Select a component first.")
+            return
+        dlg = SymbolBrowserDialog(self._library, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            sym_name = dlg.selected_symbol()
+            if sym_name:
+                parts = sym_name.split(":", 1)
+                fp.symbol_lib = parts[0]
+                fp.symbol_name = parts[1] if len(parts) > 1 else parts[0]
+                self._props.set_component(fp)
+                self._comp_list.refresh(self._footprints)
+                self._status.showMessage(
+                    f"Linked {fp.reference} → {sym_name}")
+
+    # ------------------------------------------------------------------
+    # Component selection / deletion
+    # ------------------------------------------------------------------
+
+    def _on_select_component(self, uid: str) -> None:
+        for fp in self._footprints:
+            if fp.uid == uid:
+                fp.setSelected(True)
+                self._props.set_component(fp)
+                self._view.centerOn(fp)
+                return
+
+    def _on_delete_component(self, uid: str) -> None:
+        for i, fp in enumerate(self._footprints):
+            if fp.uid == uid:
+                self._scene.removeItem(fp)
+                self._footprints.pop(i)
+                self._comp_list.refresh(self._footprints)
+                self._props.set_component(None)
+                self._status.showMessage(f"Removed {fp.reference}")
+                return
+
+    def _on_property_changed(self) -> None:
+        self._comp_list.refresh(self._footprints)
+
+    def _selected_footprint(self) -> Optional[FootprintItem]:
+        for fp in self._footprints:
+            if fp.isSelected():
+                return fp
+        return self._props._current
+
+    # ------------------------------------------------------------------
+    # Connect Nets mode
+    # ------------------------------------------------------------------
+
+    def _on_toggle_connect_mode(self, checked: bool) -> None:
+        self._connect_mode = checked
+        for fp in self._footprints:
+            fp.connect_mode = checked
+        if checked:
+            self._status.showMessage("Connect Nets mode ON — click a pad to assign net name")
+        else:
+            self._status.showMessage("Connect Nets mode OFF")
+
+    def _on_pad_clicked(self, fp_uid: str, pad_number: str) -> None:
+        fp = next((f for f in self._footprints if f.uid == fp_uid), None)
+        if not fp:
+            return
+        current_net = fp.pad_nets.get(pad_number, "")
+        net_name, ok = QInputDialog.getText(
+            self,
+            f"Assign Net — {fp.reference} pad {pad_number}",
+            "Net name (empty to clear):",
+            text=current_net,
+        )
+        if ok:
+            fp.set_pad_net(pad_number, net_name.strip())
+            self._status.showMessage(
+                f"{fp.reference}[{pad_number}] → '{net_name.strip()}'"
+                if net_name.strip() else
+                f"{fp.reference}[{pad_number}] net cleared"
+            )
+
+    # ------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------
+
+    def _on_export_project(self) -> None:
+        if not self._footprints:
+            QMessageBox.information(
+                self, "Export", "No components placed. Add at least one footprint.")
+            return
+
+        directory = QFileDialog.getExistingDirectory(self, "Choose Export Folder")
+        if not directory:
+            return
+
+        project_name = Path(directory).name or "pcb_project"
+
+        try:
+            mgr = KiCadProjectManager(self._library, self._coord)
+            out = mgr.export(self._footprints, directory, project_name)
+            self._status.showMessage(f"Exported KiCad 9 project → {out}")
+            QMessageBox.information(
+                self, "Export Complete",
+                f"KiCad 9 project exported:\n\n"
+                f"  {out / (project_name + '.kicad_pro')}\n"
+                f"  {out / (project_name + '.kicad_pcb')}\n"
+                f"  {out / (project_name + '.kicad_sch')}\n\n"
+                f"Open the .kicad_pro in KiCad 9 to continue.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Export Error", str(exc))
+
+    # ------------------------------------------------------------------
+    # Settings
+    # ------------------------------------------------------------------
+
+    def _on_settings(self) -> None:
+        dlg = PathSettingsDialog(self._library, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._library.set_footprint_paths(dlg.footprint_paths())
+            self._library.set_symbol_paths(dlg.symbol_paths())
+            fp_c, sym_c = self._library.scan()
+            self._lib_browser.populate()
+            self._status.showMessage(
+                f"Paths updated. Libraries: {fp_c} footprints, {sym_c} symbols.")
