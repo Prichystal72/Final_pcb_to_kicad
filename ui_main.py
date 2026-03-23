@@ -20,8 +20,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QPointF, Signal, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QWheelEvent, QIcon
+from PySide6.QtCore import Qt, QPointF, Signal, QTimer, QThread, QObject
+from PySide6.QtGui import QAction, QKeySequence, QWheelEvent, QIcon, QPen, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QGraphicsLineItem,
 )
 
 from coordinate_system import CoordinateSystem
@@ -522,6 +523,23 @@ class SymbolBrowserDialog(QDialog):
 
 
 # ====================================================================
+# Background library scanner
+# ====================================================================
+
+class _ScanWorker(QObject):
+    """Runs LibraryBridge.scan() in a background thread."""
+    finished = Signal(int, int)  # fp_count, sym_count
+
+    def __init__(self, library: "LibraryBridge") -> None:
+        super().__init__()
+        self._library = library
+
+    def run(self) -> None:
+        fp_count, sym_count = self._library.scan()
+        self.finished.emit(fp_count, sym_count)
+
+
+# ====================================================================
 # Main Window
 # ====================================================================
 
@@ -538,6 +556,11 @@ class MainWindow(QMainWindow):
         self._library = LibraryBridge()
         self._footprints: list[FootprintItem] = []
         self._project_path: Optional[str] = None
+
+        # Connect-nets state
+        self._pending_pad: Optional[tuple[str, str]] = None  # (fp_uid, pad_number)
+        self._net_counter: int = 0
+        self._ratsnest_lines: list[QGraphicsLineItem] = []
 
         # Central canvas
         self._view = PcbGraphicsView(self._scene)
@@ -579,8 +602,14 @@ class MainWindow(QMainWindow):
         # Wire signals
         self._wire_signals()
 
-        # Initial library scan (deferred to not block UI)
-        QTimer.singleShot(100, self._initial_scan)
+        # Initial library scan – runs in background thread to keep UI responsive
+        self._scan_thread = QThread(self)
+        self._scan_worker = _ScanWorker(self._library)
+        self._scan_worker.moveToThread(self._scan_thread)
+        self._scan_thread.started.connect(self._scan_worker.run)
+        self._scan_worker.finished.connect(self._on_scan_finished)
+        self._scan_worker.finished.connect(self._scan_thread.quit)
+        QTimer.singleShot(100, self._scan_thread.start)
 
     # ------------------------------------------------------------------
     # Toolbar (single, no duplicate menu)
@@ -609,8 +638,9 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
 
         # Nets
-        self._act_connect_nets = tb.addAction("Connect Nets", self._on_toggle_connect_mode)
+        self._act_connect_nets = tb.addAction("Connect Nets")
         self._act_connect_nets.setCheckable(True)
+        self._act_connect_nets.toggled.connect(self._on_toggle_connect_mode)
         tb.addSeparator()
 
         # Export
@@ -630,6 +660,7 @@ class MainWindow(QMainWindow):
         self._comp_list.delete_requested.connect(self._on_delete_component)
         self._props.property_changed.connect(self._on_property_changed)
         self._props.link_symbol_requested.connect(self._on_link_symbol)
+        self._scene.selectionChanged.connect(self._on_scene_selection_changed)
         self._connect_mode: bool = False
 
         # Image layer controls
@@ -646,8 +677,7 @@ class MainWindow(QMainWindow):
     # Library scan
     # ------------------------------------------------------------------
 
-    def _initial_scan(self) -> None:
-        fp_count, sym_count = self._library.scan()
+    def _on_scan_finished(self, fp_count: int, sym_count: int) -> None:
         self._lib_browser.populate()
         if fp_count or sym_count:
             self._status.showMessage(
@@ -735,10 +765,13 @@ class MainWindow(QMainWindow):
             for pad_num, net_name in cd.get("pad_nets", {}).items():
                 item.set_pad_net(pad_num, net_name)
             item.signals.pad_clicked.connect(self._on_pad_clicked)
+            item.signals.pad_right_clicked.connect(self._on_pad_right_clicked)
+            item.signals.position_changed.connect(lambda *_: self._rebuild_ratsnest())
             self._scene.addItem(item)
             self._footprints.append(item)
 
         self._comp_list.refresh(self._footprints)
+        self._rebuild_ratsnest()
         self._project_path = path
         self._status.showMessage(f"Opened: {path}")
 
@@ -831,6 +864,8 @@ class MainWindow(QMainWindow):
         )
         item.setPos(centre)
         item.signals.pad_clicked.connect(self._on_pad_clicked)
+        item.signals.pad_right_clicked.connect(self._on_pad_right_clicked)
+        item.signals.position_changed.connect(lambda *_: self._rebuild_ratsnest())
         item.connect_mode = self._connect_mode
         self._scene.addItem(item)
         self._footprints.append(item)
@@ -911,6 +946,13 @@ class MainWindow(QMainWindow):
     def _on_property_changed(self) -> None:
         self._comp_list.refresh(self._footprints)
 
+    def _on_scene_selection_changed(self) -> None:
+        selected = [fp for fp in self._footprints if fp.isSelected()]
+        if selected:
+            self._props.set_component(selected[0])
+        elif not self._scene.selectedItems():
+            self._props.set_component(None)
+
     def _selected_footprint(self) -> Optional[FootprintItem]:
         for fp in self._footprints:
             if fp.isSelected():
@@ -925,29 +967,116 @@ class MainWindow(QMainWindow):
         self._connect_mode = checked
         for fp in self._footprints:
             fp.connect_mode = checked
+        if not checked and self._pending_pad:
+            # Cancel any pending source pad
+            src_uid, src_pad = self._pending_pad
+            src_fp = next((f for f in self._footprints if f.uid == src_uid), None)
+            if src_fp:
+                src_fp.highlight_pad(src_pad, False)
+            self._pending_pad = None
         if checked:
-            self._status.showMessage("Connect Nets mode ON — click a pad to assign net name")
+            self._status.showMessage(
+                "Connect Nets ON — LEFT CLICK pad 1, then pad 2 to connect  |  RIGHT CLICK pad to set name manually")
         else:
             self._status.showMessage("Connect Nets mode OFF")
 
     def _on_pad_clicked(self, fp_uid: str, pad_number: str) -> None:
+        """Two-click connect: first click selects source, second click connects."""
+        fp = next((f for f in self._footprints if f.uid == fp_uid), None)
+        if not fp:
+            return
+
+        if self._pending_pad is None:
+            # ---- First click: select source pad ----
+            self._pending_pad = (fp_uid, pad_number)
+            fp.highlight_pad(pad_number, True)
+            net = fp.pad_nets.get(pad_number, "")
+            self._status.showMessage(
+                f"Source: {fp.reference}[{pad_number}]"
+                + (f" (net: {net})" if net else "")
+                + "  — click target pad to connect  |  click same pad to cancel")
+        else:
+            src_uid, src_pad = self._pending_pad
+            src_fp = next((f for f in self._footprints if f.uid == src_uid), None)
+
+            # Clear highlight on source pad
+            if src_fp:
+                src_fp.highlight_pad(src_pad, False)
+            self._pending_pad = None
+
+            # Same pad clicked again → cancel
+            if src_uid == fp_uid and src_pad == pad_number:
+                self._status.showMessage("Connection cancelled.")
+                return
+
+            # Determine net name: prefer existing net, else auto-generate
+            src_net = src_fp.pad_nets.get(src_pad, "") if src_fp else ""
+            dst_net = fp.pad_nets.get(pad_number, "")
+            if src_net:
+                net = src_net
+            elif dst_net:
+                net = dst_net
+            else:
+                self._net_counter += 1
+                net = f"Net_{self._net_counter}"
+
+            if src_fp:
+                src_fp.set_pad_net(src_pad, net)
+            fp.set_pad_net(pad_number, net)
+            self._rebuild_ratsnest()
+            src_ref = src_fp.reference if src_fp else "?"
+            self._status.showMessage(
+                f"Connected {src_ref}[{src_pad}] ↔ {fp.reference}[{pad_number}]  net: '{net}'")
+
+    def _on_pad_right_clicked(self, fp_uid: str, pad_number: str) -> None:
+        """Right-click: manually enter/clear net name for a single pad."""
         fp = next((f for f in self._footprints if f.uid == fp_uid), None)
         if not fp:
             return
         current_net = fp.pad_nets.get(pad_number, "")
         net_name, ok = QInputDialog.getText(
             self,
-            f"Assign Net — {fp.reference} pad {pad_number}",
-            "Net name (empty to clear):",
+            f"Set Net — {fp.reference} pad {pad_number}",
+            "Net name (leave empty to clear):",
             text=current_net,
         )
         if ok:
             fp.set_pad_net(pad_number, net_name.strip())
+            self._rebuild_ratsnest()
             self._status.showMessage(
                 f"{fp.reference}[{pad_number}] → '{net_name.strip()}'"
                 if net_name.strip() else
-                f"{fp.reference}[{pad_number}] net cleared"
-            )
+                f"{fp.reference}[{pad_number}] net cleared")
+
+    def _rebuild_ratsnest(self) -> None:
+        """Redraw ratsnest lines connecting pads that share the same net."""
+        for line in self._ratsnest_lines:
+            self._scene.removeItem(line)
+        self._ratsnest_lines.clear()
+
+        # Build net -> [(fp, pad_number), ...] map
+        net_map: dict[str, list[tuple[FootprintItem, str]]] = {}
+        for fp in self._footprints:
+            for pad_num, net_name in fp.pad_nets.items():
+                if net_name:
+                    net_map.setdefault(net_name, []).append((fp, pad_num))
+
+        pen = QPen(QColor(255, 220, 0, 170), 1.2)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        for net_name, pads in net_map.items():
+            if len(pads) < 2:
+                continue
+            for i in range(len(pads) - 1):
+                fp_a, pad_a = pads[i]
+                fp_b, pad_b = pads[i + 1]
+                pos_a = fp_a.pad_scene_pos(pad_a)
+                pos_b = fp_b.pad_scene_pos(pad_b)
+                if pos_a and pos_b:
+                    line = QGraphicsLineItem(pos_a.x(), pos_a.y(), pos_b.x(), pos_b.y())
+                    line.setPen(pen)
+                    line.setZValue(-1)
+                    self._scene.addItem(line)
+                    self._ratsnest_lines.append(line)
 
     # ------------------------------------------------------------------
     # Export
@@ -988,7 +1117,16 @@ class MainWindow(QMainWindow):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._library.set_footprint_paths(dlg.footprint_paths())
             self._library.set_symbol_paths(dlg.symbol_paths())
-            fp_c, sym_c = self._library.scan()
-            self._lib_browser.populate()
-            self._status.showMessage(
-                f"Paths updated. Libraries: {fp_c} footprints, {sym_c} symbols.")
+            self._status.showMessage("Scanning libraries…")
+            self._lib_browser._fp_tree.clear()
+            self._lib_browser._sym_tree.clear()
+            # Restart background scan
+            if self._scan_thread.isRunning():
+                self._scan_thread.quit()
+                self._scan_thread.wait(2000)
+            self._scan_worker = _ScanWorker(self._library)
+            self._scan_worker.moveToThread(self._scan_thread)
+            self._scan_thread.started.connect(self._scan_worker.run)
+            self._scan_worker.finished.connect(self._on_scan_finished)
+            self._scan_worker.finished.connect(self._scan_thread.quit)
+            self._scan_thread.start()

@@ -37,6 +37,7 @@ _SEL_BORDER = QColor(255, 120, 0, 230)
 _NORM_BORDER = QColor(0, 200, 0, 200)
 _PAD_NET = QColor(50, 220, 80, 220)    # pad with a net assigned
 _PAD_HOVER = QColor(255, 200, 0, 200)  # pad highlighted in connect mode
+_PAD_PENDING = QColor(255, 80, 220, 230)  # first-clicked pad waiting for target
 
 
 def _layer_color(layer: str) -> QColor:
@@ -54,7 +55,8 @@ class _Signals(QObject):
     position_changed = Signal(str, float, float)
     selected_changed = Signal(str, bool)
     # emitted when the user clicks a pad in connect-net mode
-    pad_clicked = Signal(str, str)   # fp_uid, pad_number
+    pad_clicked = Signal(str, str)        # fp_uid, pad_number  (left-click)
+    pad_right_clicked = Signal(str, str)  # fp_uid, pad_number  (right-click)
 
 
 class PadGraphicsItem(QGraphicsItem):
@@ -82,6 +84,7 @@ class PadGraphicsItem(QGraphicsItem):
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setZValue(10)
+        self._pending: bool = False  # highlighted as source in two-click connect
 
     # ------------------------------------------------------------------
 
@@ -95,7 +98,9 @@ class PadGraphicsItem(QGraphicsItem):
         px = pad.x * self._ppm
         py = pad.y * self._ppm
 
-        if self._hover:
+        if self._pending:
+            color = _PAD_PENDING
+        elif self._hover:
             color = _PAD_HOVER
         elif self._net_name:
             color = _PAD_NET
@@ -137,6 +142,10 @@ class PadGraphicsItem(QGraphicsItem):
         self._net_name = net_name
         self.update()
 
+    def set_pending(self, active: bool) -> None:
+        self._pending = active
+        self.update()
+
     def hoverEnterEvent(self, event) -> None:  # type: ignore[override]
         if self._fp.connect_mode:
             self._hover = True
@@ -149,11 +158,17 @@ class PadGraphicsItem(QGraphicsItem):
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        if self._fp.connect_mode and event.button() == Qt.MouseButton.LeftButton:
-            self._fp.signals.pad_clicked.emit(self._fp.uid, self.pad.number)
-            event.accept()
-            return
-        super().mousePressEvent(event)
+        if self._fp.connect_mode:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._fp.signals.pad_clicked.emit(self._fp.uid, self.pad.number)
+                event.accept()
+                return
+            if event.button() == Qt.MouseButton.RightButton:
+                self._fp.signals.pad_right_clicked.emit(self._fp.uid, self.pad.number)
+                event.accept()
+                return
+        # Not in connect mode – let the parent group handle dragging
+        event.ignore()
 
 
 class FootprintItem(QGraphicsItemGroup):
@@ -203,6 +218,7 @@ class FootprintItem(QGraphicsItemGroup):
             | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
+        self.setHandlesChildEvents(False)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
 
         if footprint_data:
@@ -371,6 +387,12 @@ class FootprintItem(QGraphicsItemGroup):
         item = self._pad_items.get(pad_number)
         if item:
             item.set_net(net_name)
+
+    def highlight_pad(self, pad_number: str, active: bool) -> None:
+        """Mark pad as the pending source in two-click connect mode."""
+        item = self._pad_items.get(pad_number)
+        if item:
+            item.set_pending(active)
 
     def pad_scene_pos(self, pad_number: str) -> Optional[QPointF]:
         """Scene position of the centre of a pad (for wire drawing)."""

@@ -248,7 +248,7 @@ class KicadPcbWriter:
 
 
 class KicadSchWriter:
-    """Produces a .kicad_sch with linked symbols."""
+    """Produces a .kicad_sch with linked symbols and net labels."""
 
     def generate(self, components: list[ComponentPlacement],
                  output_path: Path) -> None:
@@ -266,12 +266,23 @@ class KicadSchWriter:
         x_start, y_start = 30.0, 30.0
         x_step, y_step = 40.0, 35.0
 
+        # Track pin scene positions for net label generation
+        # net_name -> list of (scene_x, scene_y)
+        pin_positions: dict[str, list[tuple[float, float]]] = {}
+
         for i, comp in enumerate(components):
             col = i % grid_cols
             row = i // grid_cols
             sx = x_start + col * x_step
             sy = y_start + row * y_step
             self._write_symbol_instance(lines, comp, sx, sy)
+            # Collect pin connection points for net labels
+            self._collect_pin_positions(comp, sx, sy, pin_positions)
+
+        # Write net labels at each pin that has a net
+        for net_name, positions in pin_positions.items():
+            for px, py in positions:
+                self._write_net_label(lines, net_name, px, py)
 
         lines.append(')\n')
 
@@ -381,6 +392,66 @@ class KicadSchWriter:
         lines.append(f'        )\n')
         lines.append(f'      )\n')
         lines.append(f'    )\n')
+        lines.append(f'  )\n')
+
+    def _collect_pin_positions(self, comp: ComponentPlacement,
+                               sym_x: float, sym_y: float,
+                               pin_positions: dict[str, list[tuple[float, float]]]) -> None:
+        """Determine where each pin's connection point lands in schematic coords."""
+        if not comp.pad_nets:
+            return
+
+        # Try to extract pin layout from the real symbol sexpr
+        pins = self._extract_pins_from_sexpr(comp.symbol_sexpr) if comp.symbol_sexpr.strip() else {}
+        if not pins:
+            # Placeholder symbol: pin 1 at left (-5.08, 0), pin 2 at right (5.08, 0)
+            pins = {"1": (-5.08, 0.0), "2": (5.08, 0.0)}
+
+        for pad_num, net_name in comp.pad_nets.items():
+            if not net_name:
+                continue
+            if pad_num in pins:
+                px, py = pins[pad_num]
+                scene_x = sym_x + px
+                scene_y = sym_y + py
+                pin_positions.setdefault(net_name, []).append((scene_x, scene_y))
+
+    @staticmethod
+    def _extract_pins_from_sexpr(sexpr_text: str) -> dict[str, tuple[float, float]]:
+        """Parse pin number -> (x, y) from symbol S-expression."""
+        pins: dict[str, tuple[float, float]] = {}
+        try:
+            tree = parse_sexpr(sexpr_text.strip())
+        except Exception:
+            return pins
+        if not tree or not isinstance(tree, list):
+            return pins
+        for sub_sym in find_all(tree, "symbol"):
+            for pin_node in find_all(sub_sym, "pin"):
+                at = find_node(pin_node, "at")
+                num_node = find_node(pin_node, "number")
+                if at and num_node and len(at) >= 3 and len(num_node) >= 2:
+                    num = str(num_node[1])
+                    px = float(at[1])
+                    py = float(at[2])
+                    pins[num] = (px, py)
+        # Also check top-level pins
+        for pin_node in find_all(tree, "pin"):
+            at = find_node(pin_node, "at")
+            num_node = find_node(pin_node, "number")
+            if at and num_node and len(at) >= 3 and len(num_node) >= 2:
+                num = str(num_node[1])
+                px = float(at[1])
+                py = float(at[2])
+                pins[num] = (px, py)
+        return pins
+
+    @staticmethod
+    def _write_net_label(lines: list[str], net_name: str, x: float, y: float) -> None:
+        """Write a KiCad net label at the given schematic position."""
+        lines.append(f'  (label "{net_name}" (at {x:.2f} {y:.2f} 0)\n')
+        lines.append(f'    (effects (font (size 1.27 1.27)))\n')
+        lines.append(f'    (uuid "{_uuid()}")\n')
         lines.append(f'  )\n')
 
 
