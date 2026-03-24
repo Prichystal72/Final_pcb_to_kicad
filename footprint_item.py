@@ -25,30 +25,18 @@ from PySide6.QtWidgets import (
 from library_bridge import (
     FootprintData, PadData, LineData, CircleData, ArcData, RectData, PolyData,
 )
-
-# Colour palette
-_PAD_SMD = QColor(200, 50, 50, 160)
-_PAD_THT = QColor(50, 50, 200, 160)
-_PAD_DRILL = QColor(40, 40, 40, 210)
-_SILK = QColor(0, 200, 200, 180)
-_FAB = QColor(200, 200, 50, 120)
-_CRTYD = QColor(200, 0, 200, 100)
-_SEL_BORDER = QColor(255, 120, 0, 230)
-_NORM_BORDER = QColor(0, 200, 0, 200)
-_PAD_NET = QColor(50, 220, 80, 220)    # pad with a net assigned
-_PAD_HOVER = QColor(255, 200, 0, 200)  # pad highlighted in connect mode
-_PAD_PENDING = QColor(255, 80, 220, 230)  # first-clicked pad waiting for target
+from color_manager import cm
 
 
 def _layer_color(layer: str) -> QColor:
     ll = layer.lower()
     if "silk" in ll:
-        return _SILK
+        return cm.silkscreen()
     if "fab" in ll:
-        return _FAB
+        return cm.fab()
     if "crtyd" in ll or "courtyard" in ll:
-        return _CRTYD
-    return _SILK
+        return cm.courtyard()
+    return cm.silkscreen()
 
 
 class _Signals(QObject):
@@ -99,15 +87,15 @@ class PadGraphicsItem(QGraphicsItem):
         py = pad.y * self._ppm
 
         if self._pending:
-            color = _PAD_PENDING
+            color = cm.pad_pending()
         elif self._hover:
-            color = _PAD_HOVER
+            color = cm.pad_hover()
         elif self._net_name:
-            color = _PAD_NET
+            color = cm.pad_net()
         elif pad.pad_type == "thru_hole":
-            color = _PAD_THT
+            color = cm.pad_tht()
         else:
-            color = _PAD_SMD
+            color = cm.pad_smd()
 
         pen = QPen(color.darker(130), 1.5)
         painter.setPen(pen)
@@ -131,7 +119,7 @@ class PadGraphicsItem(QGraphicsItem):
 
         # Net name label
         if self._net_name:
-            painter.setPen(QPen(QColor(255, 255, 255, 230)))
+            painter.setPen(QPen(cm.text_label()))
             f = painter.font()
             f.setPixelSize(max(int(min(pw, ph) * 0.55), 6))
             painter.setFont(f)
@@ -227,7 +215,7 @@ class FootprintItem(QGraphicsItemGroup):
             self._build_placeholder()
 
         self._label = QGraphicsTextItem(self.reference, self)
-        self._label.setDefaultTextColor(QColor(255, 255, 255))
+        self._label.setDefaultTextColor(cm.text_label())
         font = QFont("Monospace", 7)
         self._label.setFont(font)
         lbl_scale = 1.0 / max(self._ppm * 0.4, 0.01)
@@ -296,8 +284,8 @@ class FootprintItem(QGraphicsItemGroup):
             dr = self._s(pad.drill) / 2
             px, py = self._s(pad.x), self._s(pad.y)
             hole = QGraphicsEllipseItem(px - dr, py - dr, 2 * dr, 2 * dr, self)
-            hole.setPen(QPen(_PAD_DRILL, 0.5))
-            hole.setBrush(QBrush(_PAD_DRILL))
+            hole.setPen(QPen(cm.pad_drill(), 0.5))
+            hole.setBrush(QBrush(cm.pad_drill()))
             hole.setZValue(11)
 
     def _draw_arc(self, arc: ArcData) -> None:
@@ -352,7 +340,7 @@ class FootprintItem(QGraphicsItemGroup):
     def _build_placeholder(self) -> None:
         w, h = self._s(3.0), self._s(2.0)
         rect = QGraphicsRectItem(-w / 2, -h / 2, w, h)
-        rect.setPen(QPen(_NORM_BORDER, 2))
+        rect.setPen(QPen(cm.border_normal(), 2))
         rect.setBrush(QBrush(QColor(0, 200, 0, 40)))
         self.addToGroup(rect)
 
@@ -417,7 +405,7 @@ class FootprintItem(QGraphicsItemGroup):
         return ""
 
     def to_dict(self) -> dict[str, Any]:
-        centre = self.center_scene_pos()
+        pos = self.pos()
         return {
             "uid": self.uid,
             "footprint_lib": self.footprint_lib,
@@ -426,8 +414,8 @@ class FootprintItem(QGraphicsItemGroup):
             "symbol_name": self.symbol_name,
             "reference": self.reference,
             "value": self.value,
-            "x_px": centre.x(),
-            "y_px": centre.y(),
+            "x_px": pos.x(),
+            "y_px": pos.y(),
             "rotation": self.rotation_deg,
             "layer": self.layer,
             "pad_nets": dict(self.pad_nets),

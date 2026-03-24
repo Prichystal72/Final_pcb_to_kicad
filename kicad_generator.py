@@ -44,6 +44,10 @@ class WirePlacement:
     x2_mm: float = 0.0
     y2_mm: float = 0.0
     net_name: str = ""
+    start_ref: str = ""   # component reference at start endpoint
+    start_pad: str = ""   # pad number at start endpoint
+    end_ref: str = ""     # component reference at end endpoint
+    end_pad: str = ""     # pad number at end endpoint
 
 
 def _uuid() -> str:
@@ -296,31 +300,46 @@ class KicadSchWriter:
 
         self._write_lib_symbols(lines, components)
 
-        # Use the same positions as on the PCB (already centered on A4
-        # by KicadPcbWriter.generate which runs first).
         # Track pin scene positions for net label generation
         # net_name -> list of (scene_x, scene_y)
         pin_positions: dict[str, list[tuple[float, float]]] = {}
+        # (reference, pad_number) -> (sch_x, sch_y) for wire endpoint lookup
+        ref_pad_to_sch: dict[tuple[str, str], tuple[float, float]] = {}
 
         for comp in components:
             sx, sy = comp.x_mm, comp.y_mm
-            # comp.rotation was already negated for KiCad by the PCB writer.
-            # Snap to 0/90/180/270 (required by KiCad schematic) and add 90°
-            # because KiCad symbols are vertical at 0° while footprints are
-            # horizontal at 0°.
-            rot = (round(comp.rotation / 90.0) * 90 + 90) % 360
+            # comp.rotation was negated for KiCad PCB by the PCB writer
+            # ((360 - R) % 360).  Undo that to recover the original canvas
+            # rotation, then add the schematic +90° offset.
+            original_rot = (360 - comp.rotation) % 360
+            rot = (round(original_rot / 90.0) * 90 + 90) % 360
             self._write_symbol_instance(lines, comp, sx, sy, rot)
             # Collect pin connection points for net labels
             self._collect_pin_positions(comp, sx, sy, rot, pin_positions)
+            # Build (ref, pad) -> SCH pin position lookup
+            self._build_ref_pad_lookup(comp, sx, sy, rot, ref_pad_to_sch)
 
         # Write net labels at each pin that has a net
         for net_name, positions in pin_positions.items():
             for px, py in positions:
                 self._write_net_label(lines, net_name, px, py)
 
-        # Write wires as schematic wire elements
-        for wire in (wires or []):
-            self._write_wire(lines, wire)
+        # Write wires: for each segment, snap pad-connected endpoints
+        # to the exact SCH pin position; leave free junction points as-is.
+        for w in (wires or []):
+            x1, y1 = w.x1_mm, w.y1_mm
+            x2, y2 = w.x2_mm, w.y2_mm
+            if w.start_ref and w.start_pad:
+                pin = ref_pad_to_sch.get((w.start_ref, w.start_pad))
+                if pin:
+                    x1, y1 = pin
+            if w.end_ref and w.end_pad:
+                pin = ref_pad_to_sch.get((w.end_ref, w.end_pad))
+                if pin:
+                    x2, y2 = pin
+            if math.hypot(x2 - x1, y2 - y1) > 0.01:
+                self._write_wire(lines, WirePlacement(
+                    x1_mm=x1, y1_mm=y1, x2_mm=x2, y2_mm=y2))
 
         lines.append(')\n')
 
@@ -365,8 +384,10 @@ class KicadSchWriter:
     def _write_placeholder_lib_symbol(self, lines: list[str], comp: ComponentPlacement) -> None:
         if comp.symbol_lib and comp.symbol_name:
             sym_name = f"{comp.symbol_lib}:{comp.symbol_name}"
+            short_name = comp.symbol_name
         else:
             sym_name = f"_placeholder:{comp.reference}"
+            short_name = comp.reference
 
         lines.append(f'    (symbol "{sym_name}"\n')
         lines.append(f'      (pin_names (offset 1.016))\n')
@@ -382,13 +403,13 @@ class KicadSchWriter:
         lines.append(f'      (property "Footprint" "{comp.footprint_lib}:{comp.footprint_name}" (at 0 -5.08 0)\n')
         lines.append(f'        (effects (font (size 1.27 1.27)) hide)\n')
         lines.append(f'      )\n')
-        lines.append(f'      (symbol "{sym_name}_0_1"\n')
+        lines.append(f'      (symbol "{short_name}_0_1"\n')
         lines.append(f'        (rectangle (start -2.54 1.27) (end 2.54 -1.27)\n')
         lines.append(f'          (stroke (width 0.254) (type default))\n')
         lines.append(f'          (fill (type background))\n')
         lines.append(f'        )\n')
         lines.append(f'      )\n')
-        lines.append(f'      (symbol "{sym_name}_1_1"\n')
+        lines.append(f'      (symbol "{short_name}_1_1"\n')
         lines.append(f'        (pin passive line (at -5.08 0 0) (length 2.54)\n')
         lines.append(f'          (name "1" (effects (font (size 1.27 1.27))))\n')
         lines.append(f'          (number "1" (effects (font (size 1.27 1.27))))\n')
@@ -471,6 +492,22 @@ class KicadSchWriter:
                 scene_y = sym_y + rpy
                 pin_positions.setdefault(net_name, []).append((scene_x, scene_y))
 
+    def _build_ref_pad_lookup(self, comp: ComponentPlacement,
+                              sym_x: float, sym_y: float, rotation: float,
+                              lookup: dict[tuple[str, str], tuple[float, float]]) -> None:
+        """Populate (reference, pad_number) → (sch_x, sch_y) for every pin."""
+        pins = self._extract_pins_from_sexpr(comp.symbol_sexpr) if comp.symbol_sexpr.strip() else {}
+        if not pins:
+            pins = {"1": (-5.08, 0.0), "2": (5.08, 0.0)}
+
+        rad = math.radians(rotation)
+        cos_r, sin_r = math.cos(rad), math.sin(rad)
+        for pad_num, (px, py) in pins.items():
+            py = -py  # Y-up → Y-down
+            rpx = px * cos_r - py * sin_r
+            rpy = px * sin_r + py * cos_r
+            lookup[(comp.reference, pad_num)] = (sym_x + rpx, sym_y + rpy)
+
     @staticmethod
     def _extract_pins_from_sexpr(sexpr_text: str) -> dict[str, tuple[float, float]]:
         """Parse pin number -> (x, y) from symbol S-expression."""
@@ -544,6 +581,10 @@ class KicadProjectWriter:
                 x2_mm=w.x2_mm + dx,
                 y2_mm=w.y2_mm + dy,
                 net_name=w.net_name,
+                start_ref=w.start_ref,
+                start_pad=w.start_pad,
+                end_ref=w.end_ref,
+                end_pad=w.end_pad,
             ))
 
         sch_writer = KicadSchWriter()

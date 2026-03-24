@@ -88,15 +88,45 @@ class KiCadProjectManager:
             )
             placements.append(cp)
 
-        # Convert wire data from pixel coords to mm
+        # Build pad pixel-position lookup: (x_px, y_px, reference, pad_num)
+        pad_lookup: list[tuple[float, float, str, str]] = []
+        for fp in footprints:
+            ref = fp.reference
+            for pn in fp.pad_numbers():
+                spos = fp.pad_scene_pos(pn)
+                if spos is not None:
+                    pad_lookup.append((spos.x(), spos.y(), ref, pn))
+
+        def _find_pad(x_px: float, y_px: float) -> tuple[str, str]:
+            """Return (reference, pad_number) of nearest pad, or ('','')."""
+            best_d = 15.0 * ppm  # 15 mm tolerance in pixels
+            ref, pad = "", ""
+            for px, py, r, p in pad_lookup:
+                d = ((px - x_px) ** 2 + (py - y_px) ** 2) ** 0.5
+                if d < best_d:
+                    best_d = d
+                    ref, pad = r, p
+            return ref, pad
+
+        # Convert wire data from pixel coords to mm, tagging pad connections
         wire_placements: list[WirePlacement] = []
         for wd in (wire_data or []):
+            x1_px = wd.get("x1", 0.0)
+            y1_px = wd.get("y1", 0.0)
+            x2_px = wd.get("x2", 0.0)
+            y2_px = wd.get("y2", 0.0)
+            s_ref, s_pad = _find_pad(x1_px, y1_px)
+            e_ref, e_pad = _find_pad(x2_px, y2_px)
             wp = WirePlacement(
-                x1_mm=wd.get("x1", 0.0) / ppm,
-                y1_mm=wd.get("y1", 0.0) / ppm,
-                x2_mm=wd.get("x2", 0.0) / ppm,
-                y2_mm=wd.get("y2", 0.0) / ppm,
+                x1_mm=x1_px / ppm,
+                y1_mm=y1_px / ppm,
+                x2_mm=x2_px / ppm,
+                y2_mm=y2_px / ppm,
                 net_name=wd.get("net_name", ""),
+                start_ref=s_ref,
+                start_pad=s_pad,
+                end_ref=e_ref,
+                end_pad=e_pad,
             )
             wire_placements.append(wp)
 

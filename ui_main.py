@@ -22,10 +22,12 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QPointF, Signal, QTimer, QThread, QObject
-from PySide6.QtGui import QAction, QKeySequence, QWheelEvent, QIcon, QPen, QColor
+from PySide6.QtGui import (QAction, QKeySequence, QWheelEvent, QIcon, QPen,
+                            QColor, QBrush)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -67,6 +69,7 @@ from kicad_project import KiCadProjectManager
 from library_bridge import LibraryBridge
 from project_manager import save_project, load_project
 from wire_item import WireSegmentItem, JunctionItem, WirePreviewItem, compute_45_route
+from color_manager import cm
 
 
 # ====================================================================
@@ -622,6 +625,7 @@ class MainWindow(QMainWindow):
         # Core objects
         self._coord = CoordinateSystem(pixels_per_mm=10.0)
         self._scene = QGraphicsScene(self)
+        self._scene.setBackgroundBrush(QBrush(cm.background()))
         self._image_engine = ImageEngine(self._scene)
         self._library = LibraryBridge()
         self._footprints: list[FootprintItem] = []
@@ -684,6 +688,9 @@ class MainWindow(QMainWindow):
         # Wire signals
         self._wire_signals()
 
+        # Apply theme (stylesheet + canvas background)
+        self._apply_theme()
+
         # Initial library scan
         self._scan_thread = QThread(self)
         self._scan_worker = _ScanWorker(self._library)
@@ -698,11 +705,34 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _create_layer_panel(self) -> QGroupBox:
-        grp = QGroupBox("Layers")
+        grp = QGroupBox("Layers && Theme")
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(4, 4, 4, 4)
 
+        # ---- Theme selector ----
+        theme_row = QHBoxLayout()
+        theme_row.addWidget(QLabel("Theme:"))
+        self._theme_combo = QComboBox()
+        self._theme_combo.addItems(cm.scheme_names())
+        self._theme_combo.setCurrentText(cm.current_scheme_name())
+        self._theme_combo.currentTextChanged.connect(self._on_theme_changed)
+        theme_row.addWidget(self._theme_combo, 1)
+        lay.addLayout(theme_row)
+
+        # ---- Layer visibility + colour buttons ----
         self._layer_checks: dict[str, QCheckBox] = {}
+        self._layer_color_btns: dict[str, QPushButton] = {}
+
+        # Map layer-panel keys to the colour-manager key used for that layer
+        self._layer_cm_keys: dict[str, str] = {
+            "F.Cu": "pad_smd",
+            "B.Cu": "pad_tht",
+            "F.SilkS": "silkscreen",
+            "B.SilkS": "silkscreen",
+            "F.Fab": "fab",
+            "B.Fab": "fab",
+            "Wires": "wire",
+        }
         layer_names = [
             ("F.Cu", "Front Copper"),
             ("B.Cu", "Back Copper"),
@@ -713,12 +743,23 @@ class MainWindow(QMainWindow):
             ("Wires", "Wires / Nets"),
         ]
         for key, label in layer_names:
+            row = QHBoxLayout()
             chk = QCheckBox(f"{label}  ({key})")
             chk.setChecked(True)
             chk.toggled.connect(lambda checked, k=key: self._on_layer_toggled(k, checked))
-            lay.addWidget(chk)
-            self._layer_checks[key] = chk
+            row.addWidget(chk, 1)
 
+            btn = QPushButton()
+            btn.setFixedSize(22, 22)
+            btn.setToolTip(f"Change colour for {label}")
+            btn.clicked.connect(lambda _, k=key: self._on_pick_layer_color(k))
+            row.addWidget(btn)
+
+            lay.addLayout(row)
+            self._layer_checks[key] = chk
+            self._layer_color_btns[key] = btn
+
+        self._refresh_layer_color_buttons()
         return grp
 
     def _on_layer_toggled(self, layer_key: str, visible: bool) -> None:
@@ -734,6 +775,76 @@ class MainWindow(QMainWindow):
                 if layer_key in ("F.Cu", "B.Cu"):
                     if fp.layer == layer_key:
                         fp.setVisible(visible)
+
+    # ------------------------------------------------------------------
+    # Theme / colour helpers
+    # ------------------------------------------------------------------
+
+    def _refresh_layer_color_buttons(self) -> None:
+        """Update the small colour-swatch buttons to match the current scheme."""
+        for key, btn in self._layer_color_btns.items():
+            cm_key = self._layer_cm_keys.get(key, "wire")
+            c = cm.raw(cm_key)
+            btn.setStyleSheet(
+                f"background-color: rgba({c[0]},{c[1]},{c[2]},{c[3]});"
+                " border: 1px solid #888; border-radius: 3px;"
+            )
+
+    def _on_pick_layer_color(self, layer_key: str) -> None:
+        cm_key = self._layer_cm_keys.get(layer_key, "wire")
+        old = cm.raw(cm_key)
+        initial = QColor(*old)
+        colour = QColorDialog.getColor(
+            initial, self, f"Colour for {layer_key}",
+            QColorDialog.ColorDialogOption.ShowAlphaChannel)
+        if colour.isValid():
+            cm.set_color(cm_key, [colour.red(), colour.green(),
+                                   colour.blue(), colour.alpha()])
+            cm.save_default(cm.current_scheme_name())
+            self._refresh_layer_color_buttons()
+            self._apply_theme()
+
+    def _on_theme_changed(self, name: str) -> None:
+        cm.set_scheme(name)
+        cm.save_default(name)
+        self._refresh_layer_color_buttons()
+        self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        """Re-apply colours from the current scheme to all visible items."""
+        # Window stylesheet (menus, panels, buttons, inputs, …)
+        self.setStyleSheet(cm.stylesheet())
+        # Canvas background
+        self._scene.setBackgroundBrush(QBrush(cm.background()))
+        # Wires, junctions
+        for w in self._wires:
+            w.update()
+        for j in self._junctions:
+            j.setBrush(QBrush(cm.junction()))
+            j.setPen(QPen(cm.junction().darker(120), 1))
+        if self._wire_preview:
+            self._wire_preview.setPen(
+                QPen(cm.wire_preview(), 1.5, Qt.PenStyle.DashLine))
+        # Footprints
+        for fp in self._footprints:
+            fp.update()
+            fp._label.setDefaultTextColor(cm.text_label())
+        # Ratsnest
+        self._rebuild_ratsnest()
+
+    def _build_scheme_menu(self) -> None:
+        """Populate the View ▸ Color Scheme sub-menu with radio-like actions."""
+        self._scheme_menu.clear()
+        current = cm.current_scheme_name()
+        for name in cm.scheme_names():
+            act = self._scheme_menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(name == current)
+            act.triggered.connect(lambda _checked, n=name: self._on_scheme_action(n))
+
+    def _on_scheme_action(self, name: str) -> None:
+        self._theme_combo.setCurrentText(name)  # triggers _on_theme_changed
+        self._build_scheme_menu()  # update radio checks
 
     # ------------------------------------------------------------------
     # Menu bar
@@ -770,6 +881,11 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction("Load &Top Photo…", self._on_load_top)
         view_menu.addAction("Load &Bottom Photo…", self._on_load_bottom)
+        view_menu.addSeparator()
+
+        # Colour scheme submenu
+        self._scheme_menu = view_menu.addMenu("Color &Scheme")
+        self._build_scheme_menu()
 
         # ---- Place ----
         place_menu = mb.addMenu("&Place")
@@ -1557,7 +1673,7 @@ class MainWindow(QMainWindow):
                 if net_name:
                     net_map.setdefault(net_name, []).append((fp, pad_num))
 
-        pen = QPen(QColor(255, 220, 0, 170), 1.2)
+        pen = QPen(cm.ratsnest(), 1.2)
         pen.setStyle(Qt.PenStyle.DashLine)
         for net_name, pads in net_map.items():
             if len(pads) < 2:

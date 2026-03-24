@@ -19,11 +19,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from color_manager import cm
+
 # Visual constants
-_WIRE_COLOR = QColor(255, 255, 255, 230)
 _WIRE_WIDTH = 2.0
-_WIRE_SEL_COLOR = QColor(255, 120, 0, 255)
-_JUNCTION_COLOR = QColor(0, 200, 0, 230)
 _JUNCTION_RADIUS = 3.0
 
 
@@ -49,7 +48,7 @@ class WireSegmentItem(QGraphicsLineItem):
         self.net_name: str = net_name
         self.signals = _WireSignals()
 
-        self.setPen(QPen(_WIRE_COLOR, _WIRE_WIDTH))
+        self.setPen(QPen(cm.wire(), _WIRE_WIDTH))
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
         )
@@ -61,9 +60,9 @@ class WireSegmentItem(QGraphicsLineItem):
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem,
               widget: QWidget | None = None) -> None:
         if self.isSelected():
-            painter.setPen(QPen(_WIRE_SEL_COLOR, _WIRE_WIDTH + 1))
+            painter.setPen(QPen(cm.wire_selected(), _WIRE_WIDTH + 1))
         else:
-            painter.setPen(QPen(_WIRE_COLOR, _WIRE_WIDTH))
+            painter.setPen(QPen(cm.wire(), _WIRE_WIDTH))
         painter.drawLine(self.line())
 
     # ---- serialization ----
@@ -111,8 +110,8 @@ class JunctionItem(QGraphicsEllipseItem):
         self._cx = x
         self._cy = y
 
-        self.setBrush(QBrush(_JUNCTION_COLOR))
-        self.setPen(QPen(_JUNCTION_COLOR.darker(120), 1))
+        self.setBrush(QBrush(cm.junction()))
+        self.setPen(QPen(cm.junction().darker(120), 1))
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
         )
@@ -190,7 +189,7 @@ class WirePreviewItem(QGraphicsPathItem):
 
     def __init__(self, parent: QGraphicsItem | None = None) -> None:
         super().__init__(parent)
-        pen = QPen(QColor(180, 180, 255, 160), 1.5, Qt.PenStyle.DashLine)
+        pen = QPen(cm.wire_preview(), 1.5, Qt.PenStyle.DashLine)
         self.setPen(pen)
         self.setZValue(100)
         self._anchor = QPointF(0, 0)
