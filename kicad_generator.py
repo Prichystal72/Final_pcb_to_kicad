@@ -36,6 +36,16 @@ class ComponentPlacement:
     pad_nets: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class WirePlacement:
+    """A single wire segment for export."""
+    x1_mm: float = 0.0
+    y1_mm: float = 0.0
+    x2_mm: float = 0.0
+    y2_mm: float = 0.0
+    net_name: str = ""
+
+
 def _uuid() -> str:
     return str(uuid.uuid4())
 
@@ -60,7 +70,8 @@ class KicadPcbWriter:
         self.board_h = board_h_mm
 
     def generate(self, components: list[ComponentPlacement],
-                 output_path: Path) -> None:
+                 output_path: Path) -> tuple[float, float]:
+        """Generate PCB file. Returns (dx, dy) centering offset applied."""
         lines: list[str] = []
         lines.append('(kicad_pcb\n')
         lines.append('  (version 20241229)\n')
@@ -73,6 +84,7 @@ class KicadPcbWriter:
         self._write_nets(lines, components)
 
         # Center components on the A4 sheet (297 x 210 mm landscape)
+        dx, dy = 0.0, 0.0
         if components:
             min_x = min(c.x_mm for c in components)
             max_x = max(c.x_mm for c in components)
@@ -101,6 +113,7 @@ class KicadPcbWriter:
         if not _validate_brackets(text):
             raise ValueError("Generated .kicad_pcb has mismatched brackets")
         output_path.write_text(text, encoding="utf-8")
+        return (dx, dy)
 
     def _write_layers(self, lines: list[str]) -> None:
         lines.append('  (layers\n')
@@ -271,7 +284,8 @@ class KicadSchWriter:
     """Produces a .kicad_sch with linked symbols and net labels."""
 
     def generate(self, components: list[ComponentPlacement],
-                 output_path: Path) -> None:
+                 output_path: Path,
+                 wires: list[WirePlacement] | None = None) -> None:
         lines: list[str] = []
         lines.append('(kicad_sch\n')
         lines.append('  (version 20250114)\n')
@@ -303,6 +317,10 @@ class KicadSchWriter:
         for net_name, positions in pin_positions.items():
             for px, py in positions:
                 self._write_net_label(lines, net_name, px, py)
+
+        # Write wires as schematic wire elements
+        for wire in (wires or []):
+            self._write_wire(lines, wire)
 
         lines.append(')\n')
 
@@ -491,13 +509,23 @@ class KicadSchWriter:
         lines.append(f'    (uuid "{_uuid()}")\n')
         lines.append(f'  )\n')
 
+    @staticmethod
+    def _write_wire(lines: list[str], wire: WirePlacement) -> None:
+        """Write a wire segment as a KiCad schematic wire."""
+        lines.append(f'  (wire (pts (xy {wire.x1_mm:.2f} {wire.y1_mm:.2f})'
+                     f' (xy {wire.x2_mm:.2f} {wire.y2_mm:.2f}))\n')
+        lines.append(f'    (stroke (width 0) (type default))\n')
+        lines.append(f'    (uuid "{_uuid()}")\n')
+        lines.append(f'  )\n')
+
 
 class KicadProjectWriter:
     """Writes .kicad_pro JSON file."""
 
     def generate(self, project_name: str, output_dir: Path,
                  components: list[ComponentPlacement],
-                 board_w: float = 100.0, board_h: float = 100.0) -> dict[str, Path]:
+                 board_w: float = 100.0, board_h: float = 100.0,
+                 wires: list[WirePlacement] | None = None) -> dict[str, Path]:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         pro_path = output_dir / f"{project_name}.kicad_pro"
@@ -505,10 +533,21 @@ class KicadProjectWriter:
         sch_path = output_dir / f"{project_name}.kicad_sch"
 
         pcb_writer = KicadPcbWriter(board_w, board_h)
-        pcb_writer.generate(components, pcb_path)
+        dx, dy = pcb_writer.generate(components, pcb_path)
+
+        # Apply same centering offset to wires
+        centered_wires: list[WirePlacement] = []
+        for w in (wires or []):
+            centered_wires.append(WirePlacement(
+                x1_mm=w.x1_mm + dx,
+                y1_mm=w.y1_mm + dy,
+                x2_mm=w.x2_mm + dx,
+                y2_mm=w.y2_mm + dy,
+                net_name=w.net_name,
+            ))
 
         sch_writer = KicadSchWriter()
-        sch_writer.generate(components, sch_path)
+        sch_writer.generate(components, sch_path, wires=centered_wires)
 
         pro_data = {
             "meta": {

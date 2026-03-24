@@ -24,10 +24,12 @@ def save_project(
     top_image: str,
     bottom_image: str,
     components: list[dict[str, Any]],
+    wires: list[dict[str, Any]] | None = None,
+    junctions: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Serialize the workspace to a JSON file."""
     data = {
-        "version": "0.2.0",
+        "version": "0.3.0",
         "settings": {
             "footprint_paths": footprint_paths,
             "symbol_paths": symbol_paths,
@@ -39,6 +41,8 @@ def save_project(
             "bottom": bottom_image,
         },
         "components": components,
+        "wires": wires or [],
+        "junctions": junctions or [],
     }
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)

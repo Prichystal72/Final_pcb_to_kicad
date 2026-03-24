@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from library_bridge import LibraryBridge
-from kicad_generator import ComponentPlacement, KicadProjectWriter
+from kicad_generator import ComponentPlacement, KicadProjectWriter, WirePlacement
 
 if TYPE_CHECKING:
     from coordinate_system import CoordinateSystem
@@ -31,6 +31,7 @@ class KiCadProjectManager:
         project_name: str,
         board_w_mm: float = 100.0,
         board_h_mm: float = 100.0,
+        wire_data: list[dict[str, Any]] | None = None,
     ) -> Path:
         """Export a full KiCad 9 project.
 
@@ -87,6 +88,18 @@ class KiCadProjectManager:
             )
             placements.append(cp)
 
+        # Convert wire data from pixel coords to mm
+        wire_placements: list[WirePlacement] = []
+        for wd in (wire_data or []):
+            wp = WirePlacement(
+                x1_mm=wd.get("x1", 0.0) / ppm,
+                y1_mm=wd.get("y1", 0.0) / ppm,
+                x2_mm=wd.get("x2", 0.0) / ppm,
+                y2_mm=wd.get("y2", 0.0) / ppm,
+                net_name=wd.get("net_name", ""),
+            )
+            wire_placements.append(wp)
+
         out_dir = Path(output_dir)
         writer = KicadProjectWriter()
         writer.generate(
@@ -95,5 +108,6 @@ class KiCadProjectManager:
             components=placements,
             board_w=board_w_mm,
             board_h=board_h_mm,
+            wires=wire_placements,
         )
         return out_dir

@@ -1,11 +1,12 @@
-"""Main window – KiCad-like single-toolbar interface.
+"""Main window – professional KiCad-like interface.
 
 Structure
 ---------
-* **Toolbar** with all primary actions (no duplicate menus).
+* **Menu bar** – File, Edit, View, Place, Tools, Help.
+* **Toolbar** with primary quick-access actions.
 * **Left dock** – Library browser (footprint tree + search).
-* **Centre** – PCB canvas (QGraphicsView with photo overlays and footprints).
-* **Right dock** – Properties panel (selected component) + Component list.
+* **Centre** – PCB canvas (QGraphicsView with photo overlays, footprints, and wires).
+* **Right dock** – Properties panel (selected component) + Component list + Layers.
 * **Status bar** – library counts, hints.
 
 Dialogs
@@ -42,6 +43,8 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
+    QMenuBar,
     QMessageBox,
     QPushButton,
     QSlider,
@@ -63,6 +66,7 @@ from image_engine import ImageEngine
 from kicad_project import KiCadProjectManager
 from library_bridge import LibraryBridge
 from project_manager import save_project, load_project
+from wire_item import WireSegmentItem, JunctionItem, WirePreviewItem, compute_45_route
 
 
 # ====================================================================
@@ -71,6 +75,11 @@ from project_manager import save_project, load_project
 
 class PcbGraphicsView(QGraphicsView):
     zoom_changed = Signal(float)
+    # Emitted when user clicks on canvas in wire-draw mode
+    wire_click = Signal(QPointF)
+    wire_move = Signal(QPointF)
+    wire_double_click = Signal(QPointF)
+    canvas_right_click = Signal(QPointF, QPointF)  # scene_pos, screen_pos
 
     def __init__(self, scene: QGraphicsScene, parent=None) -> None:
         super().__init__(scene, parent)
@@ -82,12 +91,73 @@ class PcbGraphicsView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self._zoom: float = 1.0
+        self._wire_draw_mode: bool = False
+
+    def set_wire_draw_mode(self, active: bool) -> None:
+        self._wire_draw_mode = active
+        if active:
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.setMouseTracking(True)
+            self.viewport().setMouseTracking(True)
+        else:
+            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            self.unsetCursor()
+            self.setMouseTracking(False)
+            self.viewport().setMouseTracking(False)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
         self._zoom *= factor
         self.scale(factor, factor)
         self.zoom_changed.emit(self._zoom)
+
+    def mousePressEvent(self, event) -> None:
+        if self._wire_draw_mode and event.button() == Qt.MouseButton.LeftButton:
+            self.wire_click.emit(self.mapToScene(event.pos()))
+            event.accept()
+            return
+        # Middle-button pan even in wire draw mode
+        if self._wire_draw_mode and event.button() == Qt.MouseButton.MiddleButton:
+            self._pan_active = True
+            self._pan_start = event.pos()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.RightButton:
+            scene_pos = self.mapToScene(event.pos())
+            self.canvas_right_click.emit(scene_pos, event.globalPos())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if getattr(self, '_pan_active', False):
+            delta = event.pos() - self._pan_start
+            self._pan_start = event.pos()
+            hs = self.horizontalScrollBar()
+            vs = self.verticalScrollBar()
+            hs.setValue(hs.value() - delta.x())
+            vs.setValue(vs.value() - delta.y())
+            return
+        if self._wire_draw_mode:
+            self.wire_move.emit(self.mapToScene(event.pos()))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if getattr(self, '_pan_active', False) and event.button() == Qt.MouseButton.MiddleButton:
+            self._pan_active = False
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if self._wire_draw_mode and event.button() == Qt.MouseButton.LeftButton:
+            self.wire_double_click.emit(self.mapToScene(event.pos()))
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 # ====================================================================
@@ -558,9 +628,16 @@ class MainWindow(QMainWindow):
         self._project_path: Optional[str] = None
 
         # Connect-nets state
-        self._pending_pad: Optional[tuple[str, str]] = None  # (fp_uid, pad_number)
+        self._pending_pad: Optional[tuple[str, str]] = None
         self._net_counter: int = 0
         self._ratsnest_lines: list[QGraphicsLineItem] = []
+
+        # Wire drawing state
+        self._wires: list[WireSegmentItem] = []
+        self._junctions: list[JunctionItem] = []
+        self._wire_drawing: bool = False
+        self._wire_anchor: Optional[QPointF] = None
+        self._wire_preview: Optional[WirePreviewItem] = None
 
         # Central canvas
         self._view = PcbGraphicsView(self._scene)
@@ -574,7 +651,7 @@ class MainWindow(QMainWindow):
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, lib_dock)
 
-        # Right dock – properties + component list
+        # Right dock – properties + component list + layers
         right_w = QWidget()
         right_lay = QVBoxLayout(right_w)
         right_lay.setContentsMargins(0, 0, 0, 0)
@@ -585,13 +662,18 @@ class MainWindow(QMainWindow):
         self._comp_list = ComponentListWidget()
         right_lay.addWidget(self._comp_list)
 
+        # Layer visibility panel
+        self._layer_panel = self._create_layer_panel()
+        right_lay.addWidget(self._layer_panel)
+
         right_dock = QDockWidget("Properties", self)
         right_dock.setWidget(right_w)
         right_dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right_dock)
 
-        # Toolbar
+        # Menu bar + toolbar
+        self._create_menus()
         self._create_toolbar()
 
         # Status bar
@@ -602,7 +684,7 @@ class MainWindow(QMainWindow):
         # Wire signals
         self._wire_signals()
 
-        # Initial library scan – runs in background thread to keep UI responsive
+        # Initial library scan
         self._scan_thread = QThread(self)
         self._scan_worker = _ScanWorker(self._library)
         self._scan_worker.moveToThread(self._scan_thread)
@@ -612,43 +694,131 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, self._scan_thread.start)
 
     # ------------------------------------------------------------------
-    # Toolbar (single, no duplicate menu)
+    # Layer visibility panel
+    # ------------------------------------------------------------------
+
+    def _create_layer_panel(self) -> QGroupBox:
+        grp = QGroupBox("Layers")
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(4, 4, 4, 4)
+
+        self._layer_checks: dict[str, QCheckBox] = {}
+        layer_names = [
+            ("F.Cu", "Front Copper"),
+            ("B.Cu", "Back Copper"),
+            ("F.SilkS", "Front Silkscreen"),
+            ("B.SilkS", "Back Silkscreen"),
+            ("F.Fab", "Front Fabrication"),
+            ("B.Fab", "Back Fabrication"),
+            ("Wires", "Wires / Nets"),
+        ]
+        for key, label in layer_names:
+            chk = QCheckBox(f"{label}  ({key})")
+            chk.setChecked(True)
+            chk.toggled.connect(lambda checked, k=key: self._on_layer_toggled(k, checked))
+            lay.addWidget(chk)
+            self._layer_checks[key] = chk
+
+        return grp
+
+    def _on_layer_toggled(self, layer_key: str, visible: bool) -> None:
+        if layer_key == "Wires":
+            for w in self._wires:
+                w.setVisible(visible)
+            for j in self._junctions:
+                j.setVisible(visible)
+            for line in self._ratsnest_lines:
+                line.setVisible(visible)
+        else:
+            for fp in self._footprints:
+                if layer_key in ("F.Cu", "B.Cu"):
+                    if fp.layer == layer_key:
+                        fp.setVisible(visible)
+
+    # ------------------------------------------------------------------
+    # Menu bar
+    # ------------------------------------------------------------------
+
+    def _create_menus(self) -> None:
+        mb = self.menuBar()
+
+        # ---- File ----
+        file_menu = mb.addMenu("&File")
+        file_menu.addAction("&New Project", self._on_new, QKeySequence("Ctrl+N"))
+        file_menu.addAction("&Open Project…", self._on_open_project, QKeySequence("Ctrl+O"))
+        file_menu.addAction("&Save Project", self._on_save_project, QKeySequence("Ctrl+S"))
+        self._act_save_as = file_menu.addAction(
+            "Save Project &As…", self._on_save_project_as, QKeySequence("Ctrl+Shift+S"))
+        file_menu.addSeparator()
+        file_menu.addAction("&Export KiCad 9 Project…", self._on_export_project,
+                            QKeySequence("Ctrl+E"))
+        file_menu.addSeparator()
+        file_menu.addAction("E&xit", self.close, QKeySequence("Alt+F4"))
+
+        # ---- Edit ----
+        edit_menu = mb.addMenu("&Edit")
+        self._act_delete = edit_menu.addAction(
+            "&Delete Selected", self._on_delete_selected, QKeySequence.StandardKey.Delete)
+        edit_menu.addSeparator()
+        edit_menu.addAction("Select &All", self._on_select_all, QKeySequence("Ctrl+A"))
+
+        # ---- View ----
+        view_menu = mb.addMenu("&View")
+        view_menu.addAction("Zoom &In", self._on_zoom_in, QKeySequence("Ctrl+="))
+        view_menu.addAction("Zoom &Out", self._on_zoom_out, QKeySequence("Ctrl+-"))
+        view_menu.addAction("&Fit to Screen", self._on_fit_view, QKeySequence("Ctrl+0"))
+        view_menu.addSeparator()
+        view_menu.addAction("Load &Top Photo…", self._on_load_top)
+        view_menu.addAction("Load &Bottom Photo…", self._on_load_bottom)
+
+        # ---- Place ----
+        place_menu = mb.addMenu("&Place")
+        place_menu.addAction("Place &Footprint", self._on_place_from_browser,
+                             QKeySequence("P"))
+        place_menu.addAction("&Link Symbol…", self._on_link_symbol)
+        place_menu.addSeparator()
+        self._act_draw_wire = QAction("Draw &Wire", self)
+        self._act_draw_wire.setCheckable(True)
+        self._act_draw_wire.setShortcut(QKeySequence("W"))
+        self._act_draw_wire.toggled.connect(self._on_toggle_wire_draw)
+        place_menu.addAction(self._act_draw_wire)
+        place_menu.addAction("Add &Junction", self._on_add_junction, QKeySequence("J"))
+
+        # ---- Tools ----
+        tools_menu = mb.addMenu("&Tools")
+        self._act_connect_nets = tools_menu.addAction("Connect &Nets (pad mode)")
+        self._act_connect_nets.setCheckable(True)
+        self._act_connect_nets.toggled.connect(self._on_toggle_connect_mode)
+        tools_menu.addSeparator()
+        tools_menu.addAction("Library &Paths…", self._on_settings)
+
+        # ---- Help ----
+        help_menu = mb.addMenu("&Help")
+        help_menu.addAction("&About…", self._on_about)
+
+    # ------------------------------------------------------------------
+    # Toolbar (quick access)
     # ------------------------------------------------------------------
 
     def _create_toolbar(self) -> None:
         tb = QToolBar("Main", self)
         tb.setMovable(False)
-        tb.setIconSize(tb.iconSize())
         self.addToolBar(tb)
 
-        # File operations
         tb.addAction("New", self._on_new)
         tb.addAction("Open", self._on_open_project)
         tb.addAction("Save", self._on_save_project)
         tb.addSeparator()
-
-        # Photos
-        tb.addAction("Top Photo", self._on_load_top)
-        tb.addAction("Bottom Photo", self._on_load_bottom)
-        tb.addSeparator()
-
-        # Components
         tb.addAction("Place Footprint", self._on_place_from_browser)
-        tb.addAction("Link Symbol", self._on_link_symbol)
         tb.addSeparator()
 
-        # Nets
-        self._act_connect_nets = tb.addAction("Connect Nets")
-        self._act_connect_nets.setCheckable(True)
-        self._act_connect_nets.toggled.connect(self._on_toggle_connect_mode)
+        act_wire_tb = tb.addAction("Draw Wire")
+        act_wire_tb.setCheckable(True)
+        act_wire_tb.toggled.connect(self._act_draw_wire.setChecked)
+        self._act_draw_wire.toggled.connect(act_wire_tb.setChecked)
         tb.addSeparator()
 
-        # Export
-        tb.addAction("Export KiCad 9 Project", self._on_export_project)
-        tb.addSeparator()
-
-        # Settings
-        tb.addAction("Library Paths", self._on_settings)
+        tb.addAction("Export", self._on_export_project)
 
     # ------------------------------------------------------------------
     # Signal wiring
@@ -673,6 +843,296 @@ class MainWindow(QMainWindow):
         self._props.chk_mirror.toggled.connect(
             lambda v: self._image_engine.bottom().set_mirrored(v))
 
+        # Wire drawing signals from the view
+        self._view.wire_click.connect(self._on_wire_click)
+        self._view.wire_move.connect(self._on_wire_move)
+        self._view.wire_double_click.connect(self._on_wire_finish)
+        self._view.canvas_right_click.connect(self._on_canvas_right_click)
+
+    # ------------------------------------------------------------------
+    # Keyboard shortcuts
+    # ------------------------------------------------------------------
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        # R = Rotate selected component 90° CW
+        if key == Qt.Key.Key_R and not event.modifiers():
+            self._rotate_selected(90)
+            return
+        # / or Tab = toggle wire routing direction (straight-first ↔ diagonal-first)
+        if key in (Qt.Key.Key_Slash, Qt.Key.Key_Tab) and self._wire_preview:
+            self._wire_preview.toggle_direction()
+            return
+        # Escape = cancel current wire chain; if no chain, exit wire mode; if not in wire mode, deselect
+        if key == Qt.Key.Key_Escape:
+            if self._wire_anchor is not None:
+                # Cancel current in-progress wire chain only
+                self._cancel_wire_draw()
+                self._status.showMessage("Wire chain cancelled — still in wire draw mode")
+            elif self._wire_drawing:
+                self._act_draw_wire.setChecked(False)
+            else:
+                self._scene.clearSelection()
+            return
+        super().keyPressEvent(event)
+
+    def _rotate_selected(self, degrees: float) -> None:
+        for fp in self._footprints:
+            if fp.isSelected():
+                new_rot = (fp.rotation_deg + degrees) % 360
+                fp.set_rotation(new_rot)
+                self._props.set_component(fp)
+                self._rebuild_ratsnest()
+                self._status.showMessage(f"Rotated {fp.reference} → {new_rot:.0f}°")
+
+    # ------------------------------------------------------------------
+    # Right-click context menu
+    # ------------------------------------------------------------------
+
+    def _on_canvas_right_click(self, scene_pos: QPointF, screen_pos: QPointF) -> None:
+        # If drawing a wire chain, right-click cancels it
+        if self._wire_anchor is not None:
+            self._cancel_wire_draw()
+            self._status.showMessage("Wire chain cancelled")
+            return
+
+        # Check what was clicked
+        item_at = self._scene.itemAt(scene_pos, self._view.transform())
+
+        # Find if it's a footprint or wire
+        clicked_fp: Optional[FootprintItem] = None
+        clicked_wire: Optional[WireSegmentItem] = None
+        clicked_junction: Optional[JunctionItem] = None
+
+        if isinstance(item_at, FootprintItem):
+            clicked_fp = item_at
+        elif isinstance(item_at, WireSegmentItem):
+            clicked_wire = item_at
+        elif isinstance(item_at, JunctionItem):
+            clicked_junction = item_at
+        elif item_at is not None:
+            # May be a child of a FootprintItem
+            parent = item_at.parentItem()
+            if isinstance(parent, FootprintItem):
+                clicked_fp = parent
+
+        menu = QMenu(self)
+
+        if clicked_fp:
+            # Component context menu
+            menu.addAction(f"Rotate {clicked_fp.reference} CW  (R)",
+                           lambda: self._ctx_rotate_fp(clicked_fp, 90))
+            menu.addAction(f"Rotate {clicked_fp.reference} CCW",
+                           lambda: self._ctx_rotate_fp(clicked_fp, -90))
+            menu.addSeparator()
+            menu.addAction(f"Flip to {'B.Cu' if clicked_fp.layer == 'F.Cu' else 'F.Cu'}",
+                           lambda: self._ctx_flip_fp(clicked_fp))
+            menu.addAction("Link Symbol…",
+                           lambda: self._ctx_link_symbol(clicked_fp))
+            menu.addSeparator()
+            menu.addAction(f"Delete {clicked_fp.reference}",
+                           lambda: self._ctx_delete_fp(clicked_fp))
+        elif clicked_wire:
+            menu.addAction("Set Net Name…",
+                           lambda: self._ctx_set_wire_net(clicked_wire))
+            menu.addAction("Add Junction Here",
+                           lambda: self._add_junction_at(scene_pos))
+            menu.addSeparator()
+            menu.addAction("Delete Wire",
+                           lambda: self._ctx_delete_wire(clicked_wire))
+        elif clicked_junction:
+            menu.addAction("Delete Junction",
+                           lambda: self._ctx_delete_junction(clicked_junction))
+        else:
+            # Canvas context menu
+            menu.addAction("Place Footprint", self._on_place_from_browser)
+            menu.addAction("Draw Wire", lambda: self._act_draw_wire.setChecked(True))
+            menu.addAction("Add Junction", lambda: self._add_junction_at(scene_pos))
+            menu.addSeparator()
+            menu.addAction("Fit to Screen", self._on_fit_view)
+
+        menu.exec(screen_pos.toPoint())
+
+    # Context menu helpers
+    def _ctx_rotate_fp(self, fp: FootprintItem, degrees: float) -> None:
+        new_rot = (fp.rotation_deg + degrees) % 360
+        fp.set_rotation(new_rot)
+        self._props.set_component(fp)
+        self._rebuild_ratsnest()
+
+    def _ctx_flip_fp(self, fp: FootprintItem) -> None:
+        fp.layer = "B.Cu" if fp.layer == "F.Cu" else "F.Cu"
+        self._props.set_component(fp)
+
+    def _ctx_link_symbol(self, fp: FootprintItem) -> None:
+        fp.setSelected(True)
+        self._props.set_component(fp)
+        self._on_link_symbol()
+
+    def _ctx_delete_fp(self, fp: FootprintItem) -> None:
+        self._on_delete_component(fp.uid)
+
+    def _ctx_set_wire_net(self, wire: WireSegmentItem) -> None:
+        name, ok = QInputDialog.getText(
+            self, "Wire Net Name", "Net name:", text=wire.net_name)
+        if ok:
+            wire.net_name = name.strip()
+
+    def _ctx_delete_wire(self, wire: WireSegmentItem) -> None:
+        if wire in self._wires:
+            self._wires.remove(wire)
+        self._scene.removeItem(wire)
+
+    def _ctx_delete_junction(self, junc: JunctionItem) -> None:
+        if junc in self._junctions:
+            self._junctions.remove(junc)
+        self._scene.removeItem(junc)
+
+    # ------------------------------------------------------------------
+    # Wire drawing
+    # ------------------------------------------------------------------
+
+    def _on_toggle_wire_draw(self, checked: bool) -> None:
+        self._wire_drawing = checked
+        self._view.set_wire_draw_mode(checked)
+        if checked:
+            # Turn off connect-nets mode if active
+            self._act_connect_nets.setChecked(False)
+            self._status.showMessage(
+                "Draw Wire ON — CLICK to place points, DOUBLE-CLICK or ESC to finish  |  / = toggle bend direction")
+        else:
+            self._cancel_wire_draw()
+            self._status.showMessage("Draw Wire mode OFF")
+
+    def _on_wire_click(self, pos: QPointF) -> None:
+        """Called when user clicks on canvas in wire draw mode."""
+        # Snap to nearest pad if close enough
+        snap_pos = self._snap_to_pad(pos, threshold=15.0) or pos
+
+        if self._wire_anchor is None:
+            # Start new wire chain
+            self._wire_anchor = snap_pos
+            self._wire_preview = WirePreviewItem()
+            self._wire_preview.set_anchor(snap_pos)
+            self._scene.addItem(self._wire_preview)
+        else:
+            # Create 45°-constrained route from anchor to click position
+            anchor = self._wire_anchor
+            straight_first = self._wire_preview._straight_first if self._wire_preview else True
+            pts = compute_45_route(anchor, snap_pos, straight_first)
+
+            # Create segments between consecutive points
+            for i in range(len(pts) - 1):
+                p1, p2 = pts[i], pts[i + 1]
+                if (p1 - p2).manhattanLength() > 0.5:
+                    seg = WireSegmentItem(p1.x(), p1.y(), p2.x(), p2.y())
+                    self._scene.addItem(seg)
+                    self._wires.append(seg)
+
+            # Move anchor for next segment
+            self._wire_anchor = snap_pos
+            if self._wire_preview:
+                self._wire_preview.set_anchor(snap_pos)
+
+    def _on_wire_move(self, pos: QPointF) -> None:
+        """Update the wire preview as mouse moves."""
+        if self._wire_preview:
+            snap = self._snap_to_pad(pos, threshold=15.0) or pos
+            self._wire_preview.update_preview(snap)
+
+    def _on_wire_finish(self, pos: QPointF) -> None:
+        """Double-click finishes the wire chain."""
+        if self._wire_anchor is not None:
+            self._on_wire_click(pos)
+        self._cancel_wire_draw()
+
+    def _cancel_wire_draw(self) -> None:
+        """Stop wire drawing, remove preview."""
+        self._wire_anchor = None
+        if self._wire_preview:
+            self._scene.removeItem(self._wire_preview)
+            self._wire_preview = None
+
+    def _snap_to_pad(self, pos: QPointF, threshold: float = 15.0) -> Optional[QPointF]:
+        """If *pos* is within *threshold* pixels of a pad centre, return that centre."""
+        best_dist = threshold
+        best_pos: Optional[QPointF] = None
+        for fp in self._footprints:
+            for pad_num in fp.pad_numbers():
+                pad_pos = fp.pad_scene_pos(pad_num)
+                if pad_pos:
+                    dist = (pos - pad_pos).manhattanLength()
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_pos = pad_pos
+        return best_pos
+
+    def _on_add_junction(self) -> None:
+        """Add junction at the centre of the viewport."""
+        centre = self._view.mapToScene(self._view.viewport().rect().center())
+        self._add_junction_at(centre)
+
+    def _add_junction_at(self, pos: QPointF) -> None:
+        junc = JunctionItem(pos.x(), pos.y())
+        self._scene.addItem(junc)
+        self._junctions.append(junc)
+        self._status.showMessage(f"Junction added at ({pos.x():.1f}, {pos.y():.1f})")
+
+    # ------------------------------------------------------------------
+    # View actions
+    # ------------------------------------------------------------------
+
+    def _on_zoom_in(self) -> None:
+        self._view.scale(1.25, 1.25)
+
+    def _on_zoom_out(self) -> None:
+        self._view.scale(0.8, 0.8)
+
+    def _on_fit_view(self) -> None:
+        self._view.fitInView(
+            self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    def _on_select_all(self) -> None:
+        for item in self._scene.items():
+            if item.flags() & item.GraphicsItemFlag.ItemIsSelectable:
+                item.setSelected(True)
+
+    def _on_delete_selected(self) -> None:
+        """Delete all selected items (footprints, wires, junctions)."""
+        # Collect items to delete (iterate copy to avoid mutation)
+        for item in list(self._scene.selectedItems()):
+            if isinstance(item, FootprintItem):
+                self._on_delete_component(item.uid)
+            elif isinstance(item, WireSegmentItem):
+                self._ctx_delete_wire(item)
+            elif isinstance(item, JunctionItem):
+                self._ctx_delete_junction(item)
+
+    def _on_about(self) -> None:
+        QMessageBox.about(
+            self, "About PCB → KiCad",
+            "<h3>PCB → KiCad – Reverse Engineering Tool</h3>"
+            "<p>Converts scanned PCB images to KiCad 9 projects.</p>"
+            "<p>Place footprints on top/bottom photos, draw wires, "
+            "link symbols, and export to KiCad.</p>"
+            "<p><b>Shortcuts:</b></p>"
+            "<ul>"
+            "<li><b>R</b> – Rotate selected component 90°</li>"
+            "<li><b>W</b> – Toggle wire drawing mode</li>"
+            "<li><b>J</b> – Add junction</li>"
+            "<li><b>P</b> – Place footprint</li>"
+            "<li><b>Del</b> – Delete selected</li>"
+            "<li><b>Esc</b> – Cancel / deselect</li>"
+            "<li><b>Ctrl+E</b> – Export KiCad project</li>"
+            "</ul>")
+
+    def _on_save_project_as(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", "project.p2k", "PCB-to-KiCad Project (*.p2k)")
+        if path:
+            self._project_path = path
+            self._on_save_project()
+
     # ------------------------------------------------------------------
     # Library scan
     # ------------------------------------------------------------------
@@ -692,7 +1152,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_new(self) -> None:
-        if self._footprints:
+        if self._footprints or self._wires:
             reply = QMessageBox.question(
                 self, "New Project",
                 "Discard current work?",
@@ -702,6 +1162,15 @@ class MainWindow(QMainWindow):
         for fp in self._footprints:
             self._scene.removeItem(fp)
         self._footprints.clear()
+        for w in self._wires:
+            self._scene.removeItem(w)
+        self._wires.clear()
+        for j in self._junctions:
+            self._scene.removeItem(j)
+        self._junctions.clear()
+        for line in self._ratsnest_lines:
+            self._scene.removeItem(line)
+        self._ratsnest_lines.clear()
         self._comp_list.refresh(self._footprints)
         self._props.set_component(None)
         self._project_path = None
@@ -722,6 +1191,15 @@ class MainWindow(QMainWindow):
         for fp in self._footprints:
             self._scene.removeItem(fp)
         self._footprints.clear()
+        for w in self._wires:
+            self._scene.removeItem(w)
+        self._wires.clear()
+        for j in self._junctions:
+            self._scene.removeItem(j)
+        self._junctions.clear()
+        for line in self._ratsnest_lines:
+            self._scene.removeItem(line)
+        self._ratsnest_lines.clear()
 
         # Apply settings
         settings = data.get("settings", {})
@@ -774,6 +1252,19 @@ class MainWindow(QMainWindow):
 
         self._comp_list.refresh(self._footprints)
         self._rebuild_ratsnest()
+
+        # Recreate wires
+        for wd in data.get("wires", []):
+            wire = WireSegmentItem.from_dict(wd)
+            self._scene.addItem(wire)
+            self._wires.append(wire)
+
+        # Recreate junctions
+        for jd in data.get("junctions", []):
+            junc = JunctionItem.from_dict(jd)
+            self._scene.addItem(junc)
+            self._junctions.append(junc)
+
         self._project_path = path
         self._status.showMessage(f"Opened: {path}")
 
@@ -786,9 +1277,10 @@ class MainWindow(QMainWindow):
             self._project_path = path
 
         comps = [fp.to_dict() for fp in self._footprints]
+        wire_data = [w.to_dict() for w in self._wires]
+        junction_data = [j.to_dict() for j in self._junctions]
         top_img = ""
         bot_img = ""
-        # Try to recover image paths (stored in ImageEngine if available)
         try:
             top_img = str(getattr(self._image_engine.top(), '_source_path', '')) or ""
             bot_img = str(getattr(self._image_engine.bottom(), '_source_path', '')) or ""
@@ -805,6 +1297,8 @@ class MainWindow(QMainWindow):
                 top_image=top_img,
                 bottom_image=bot_img,
                 components=comps,
+                wires=wire_data,
+                junctions=junction_data,
             )
             self._status.showMessage(f"Saved: {self._project_path}")
         except Exception as exc:
@@ -1098,7 +1592,9 @@ class MainWindow(QMainWindow):
 
         try:
             mgr = KiCadProjectManager(self._library, self._coord)
-            out = mgr.export(self._footprints, directory, project_name)
+            wire_data = [w.to_dict() for w in self._wires]
+            out = mgr.export(self._footprints, directory, project_name,
+                             wire_data=wire_data)
             self._status.showMessage(f"Exported KiCad 9 project → {out}")
             QMessageBox.information(
                 self, "Export Complete",
