@@ -729,14 +729,16 @@ class MainWindow(QMainWindow):
         off = settings.get("origin_offset_mm", [0, 0])
         self._coord.origin_offset_mm = (off[0], off[1])
 
-        fp_paths = settings.get("footprint_paths", [])
-        sym_paths = settings.get("symbol_paths", [])
-        if fp_paths:
-            self._library.set_footprint_paths(fp_paths)
-        if sym_paths:
-            self._library.set_symbol_paths(sym_paths)
-        self._library.scan()
-        self._lib_browser.populate()
+        # DEBUG: při ladění nenačítáme cesty z projektu ani nepřeskenováváme
+        # knihovny – používáme pouze uživatelské knihovny načtené při startu.
+        # fp_paths = settings.get("footprint_paths", [])
+        # sym_paths = settings.get("symbol_paths", [])
+        # if fp_paths:
+        #     self._library.set_footprint_paths(fp_paths)
+        # if sym_paths:
+        #     self._library.set_symbol_paths(sym_paths)
+        # self._library.scan()
+        # self._lib_browser.populate()
 
         # Load images
         images = data.get("images", {})

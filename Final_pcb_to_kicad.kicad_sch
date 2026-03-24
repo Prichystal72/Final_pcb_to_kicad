@@ -1,0 +1,577 @@
+(kicad_sch
+  (version 20250114)
+  (generator "pcb_to_kicad")
+  (generator_version "9.0")
+  (uuid "37bed4ae-53be-43e1-a7f3-77b758a278ae")
+  (paper "A4")
+  (lib_symbols
+    				(symbol 00_basic:C_Polarized
+					(pin_numbers
+						(hide yes)
+					)
+					(pin_names
+						(offset 0.254)
+						(hide yes)
+					)
+					(exclude_from_sim no)
+					(in_bom yes)
+					(on_board yes)
+					(property Reference C
+						(at 0.635 2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Value C_Polarized
+						(at 0.635 -2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Footprint ~
+						(at 0 -20.32 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Datasheet https://cdn.sparkfun.com/assets/8/a/4/a/5/Kemet_Capacitor_Datasheet.pdf
+						(at 1.27 -15.24 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Description "Polarized capacitor, US symbol"
+						(at 0 -17.78 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property PROD_ID CAP-00000
+						(at 0 -12.7 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Voltage 1kV
+						(at 0 -7.62 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(property Tolerance 100%
+						(at 0 -10.16 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(property ki_keywords "SparkFun cap capacitor"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_fp_filters CP_*
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(symbol C_Polarized_0_1
+						(polyline
+							(pts
+								(xy -2.032 0.762)
+								(xy 2.032 0.762)
+							)
+							(stroke
+								(width 0.508)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy -1.778 2.286)
+								(xy -0.762 2.286)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy -1.27 1.778)
+								(xy -1.27 2.794)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(arc
+							(start -2.032 -1.27)
+							(mid 0 -0.5572)
+							(end 2.032 -1.27)
+							(stroke
+								(width 0.508)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+					)
+					(symbol C_Polarized_1_1
+						(pin passive line
+							(at 0 3.81 270)
+							(length 2.794)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "1"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 0 -3.81 90)
+							(length 3.302)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "2"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+					)
+					(embedded_fonts no)
+				)
+    				(symbol 00_basic:R
+					(pin_numbers
+						(hide yes)
+					)
+					(pin_names
+						(offset 0)
+					)
+					(exclude_from_sim no)
+					(in_bom yes)
+					(on_board yes)
+					(property Reference R
+						(at 2.032 0 90)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(property Value R
+						(at 0 0 90)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(property Footprint ""
+						(at -1.778 0 90)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Datasheet ~
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Description Resistor
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_keywords "R res resistor"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_fp_filters R_*
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(symbol R_0_1
+						(rectangle
+							(start -1.016 -2.54)
+							(end 1.016 2.54)
+							(stroke
+								(width 0.254)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+					)
+					(symbol R_1_1
+						(pin passive line
+							(at 0 3.81 270)
+							(length 1.27)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "1"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 0 -3.81 90)
+							(length 1.27)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "2"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+					)
+					(embedded_fonts no)
+				)
+    				(symbol "00_my_display:display 16x2 s I2C"
+					(exclude_from_sim no)
+					(in_bom yes)
+					(on_board yes)
+					(property Reference U
+						(at -6.35 15.24 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Value "display 16x2 s I2C"
+						(at -6.35 7.62 0)
+						(effects
+							(font
+								(size 1 1)
+								(color 255 50 96 1)
+							)
+							(justify left)
+						)
+					)
+					(property Footprint Moje_knihovna:diplay_ali_16x2
+						(at 26.67 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Datasheet "display 16x2 I2C"
+						(at 1.27 2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Description "LCD 16x2 Alphanumeric gray backlight, 3 or 5V VDD"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_keywords "display LCD dot-matrix"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_fp_filters *RC1602A*
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(symbol "display 16x2 s I2C_1_1"
+						(rectangle
+							(start -7.62 13.97)
+							(end 10.16 -3.81)
+							(stroke
+								(width 0.254)
+								(type solid)
+							)
+							(fill
+								(type background)
+							)
+						)
+						(pin power_in line
+							(at 0 16.51 270)
+							(length 2.54)
+							(name +5V
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "2"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin power_in line
+							(at 0 -6.35 90)
+							(length 2.54)
+							(name GND
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "1"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin input line
+							(at 12.7 5.08 180)
+							(length 2.54)
+							(name SDA
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "3"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin input line
+							(at 12.7 0 180)
+							(length 2.54)
+							(name SCL
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "4"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+					)
+					(embedded_fonts no)
+				)
+  )
+  (symbol
+    (lib_id "00_basic:C_Polarized")
+    (at 107.75 94.62 90)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "60d8d632-096c-4055-8b6f-3cb2756f8bf5")
+    (property "Reference" "U1" (at 107.75 91.62 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "CP_Radial_D10.0mm_P5.00mm" (at 107.75 97.62 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "00_basic:CP_Radial_D10.0mm_P5.00mm" (at 107.75 99.62 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U1")
+          (unit 1)
+        )
+      )
+    )
+  )
+  (symbol
+    (lib_id "00_basic:R")
+    (at 124.17 115.38 0)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "6a4336ce-3dea-48c6-af8b-f4bfea7b741e")
+    (property "Reference" "U2" (at 124.17 112.38 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "C_Axial_L3.8mm_D2.6mm_P7.50mm_Horizontal" (at 124.17 118.38 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "00_basic:C_Axial_L3.8mm_D2.6mm_P7.50mm_Horizontal" (at 124.17 120.38 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U2")
+          (unit 1)
+        )
+      )
+    )
+  )
+  (symbol
+    (lib_id "00_my_display:display 16x2 s I2C")
+    (at 189.25 100.53 90)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "e263727e-e842-4c60-adb1-c065621811b9")
+    (property "Reference" "U3" (at 189.25 97.53 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "diplay_ali_16x2" (at 189.25 103.53 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "00_display:diplay_ali_16x2" (at 189.25 105.53 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U3")
+          (unit 1)
+        )
+      )
+    )
+  )
+  (label "Net_1" (at 103.94 94.62 0)
+    (effects (font (size 1.27 1.27)))
+    (uuid "58943623-7ad5-4ba6-945b-74e03e28e935")
+  )
+  (label "Net_1" (at 124.17 119.19 0)
+    (effects (font (size 1.27 1.27)))
+    (uuid "c676f3a3-054d-46e6-ad0f-ecbee917e622")
+  )
+  (label "Net_2" (at 111.56 94.62 0)
+    (effects (font (size 1.27 1.27)))
+    (uuid "a7ee17ae-56c1-4465-9601-0dfc7691c540")
+  )
+  (label "Net_2" (at 124.17 111.57 0)
+    (effects (font (size 1.27 1.27)))
+    (uuid "8e05c875-19bd-4733-b7ad-017a546e15e9")
+  )
+)

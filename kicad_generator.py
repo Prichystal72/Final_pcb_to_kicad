@@ -63,14 +63,34 @@ class KicadPcbWriter:
                  output_path: Path) -> None:
         lines: list[str] = []
         lines.append('(kicad_pcb\n')
-        lines.append('  (version 20240108)\n')
+        lines.append('  (version 20241229)\n')
         lines.append('  (generator "pcb_to_kicad")\n')
-        lines.append('  (generator_version "0.2")\n')
+        lines.append('  (generator_version "9.0")\n')
         lines.append(f'  (general (thickness 1.6) (legacy_teardrops no))\n')
         lines.append('  (paper "A4")\n')
         self._write_layers(lines)
         self._write_setup(lines)
         self._write_nets(lines, components)
+
+        # Center components on the A4 sheet (297 x 210 mm landscape)
+        if components:
+            min_x = min(c.x_mm for c in components)
+            max_x = max(c.x_mm for c in components)
+            min_y = min(c.y_mm for c in components)
+            max_y = max(c.y_mm for c in components)
+            cx = (min_x + max_x) / 2.0
+            cy = (min_y + max_y) / 2.0
+            sheet_cx, sheet_cy = 297.0 / 2.0, 210.0 / 2.0
+            dx = sheet_cx - cx
+            dy = sheet_cy - cy
+            for c in components:
+                c.x_mm += dx
+                c.y_mm += dy
+
+        # Qt canvas uses clockwise-positive rotation,
+        # KiCad uses counter-clockwise-positive → negate.
+        for c in components:
+            c.rotation = (360 - c.rotation) % 360
 
         for comp in components:
             self._write_footprint(lines, comp, components)
@@ -254,30 +274,30 @@ class KicadSchWriter:
                  output_path: Path) -> None:
         lines: list[str] = []
         lines.append('(kicad_sch\n')
-        lines.append('  (version 20231120)\n')
+        lines.append('  (version 20250114)\n')
         lines.append('  (generator "pcb_to_kicad")\n')
-        lines.append('  (generator_version "0.2")\n')
+        lines.append('  (generator_version "9.0")\n')
         lines.append(f'  (uuid "{_uuid()}")\n')
         lines.append('  (paper "A4")\n')
 
         self._write_lib_symbols(lines, components)
 
-        grid_cols = max(int(math.sqrt(len(components))), 1) if components else 1
-        x_start, y_start = 30.0, 30.0
-        x_step, y_step = 40.0, 35.0
-
+        # Use the same positions as on the PCB (already centered on A4
+        # by KicadPcbWriter.generate which runs first).
         # Track pin scene positions for net label generation
         # net_name -> list of (scene_x, scene_y)
         pin_positions: dict[str, list[tuple[float, float]]] = {}
 
-        for i, comp in enumerate(components):
-            col = i % grid_cols
-            row = i // grid_cols
-            sx = x_start + col * x_step
-            sy = y_start + row * y_step
-            self._write_symbol_instance(lines, comp, sx, sy)
+        for comp in components:
+            sx, sy = comp.x_mm, comp.y_mm
+            # comp.rotation was already negated for KiCad by the PCB writer.
+            # Snap to 0/90/180/270 (required by KiCad schematic) and add 90°
+            # because KiCad symbols are vertical at 0° while footprints are
+            # horizontal at 0°.
+            rot = (round(comp.rotation / 90.0) * 90 + 90) % 360
+            self._write_symbol_instance(lines, comp, sx, sy, rot)
             # Collect pin connection points for net labels
-            self._collect_pin_positions(comp, sx, sy, pin_positions)
+            self._collect_pin_positions(comp, sx, sy, rot, pin_positions)
 
         # Write net labels at each pin that has a net
         for net_name, positions in pin_positions.items():
@@ -363,25 +383,35 @@ class KicadSchWriter:
         lines.append(f'    )\n')
 
     def _write_symbol_instance(self, lines: list[str], comp: ComponentPlacement,
-                               x: float, y: float) -> None:
+                               x: float, y: float, rotation: float = 0.0) -> None:
         if comp.symbol_lib and comp.symbol_name:
             lib_id = f"{comp.symbol_lib}:{comp.symbol_name}"
         else:
             lib_id = f"_placeholder:{comp.reference}"
 
+        # Property labels always horizontal with fixed offset above/below
+        ref_x, ref_y = x, y - 3.0
+        val_x, val_y = x, y + 3.0
+        fp_x, fp_y = x, y + 5.0
+
         inst_uuid = _uuid()
         lines.append(f'  (symbol\n')
         lines.append(f'    (lib_id "{lib_id}")\n')
-        lines.append(f'    (at {x:.2f} {y:.2f} 0)\n')
+        lines.append(f'    (at {x:.2f} {y:.2f} {rotation:.0f})\n')
+        lines.append(f'    (unit 1)\n')
+        lines.append(f'    (exclude_from_sim no)\n')
+        lines.append(f'    (in_bom yes)\n')
+        lines.append(f'    (on_board yes)\n')
+        lines.append(f'    (dnp no)\n')
         lines.append(f'    (uuid "{inst_uuid}")\n')
-        lines.append(f'    (property "Reference" "{comp.reference}" (at {x:.2f} {y - 3.0:.2f} 0)\n')
+        lines.append(f'    (property "Reference" "{comp.reference}" (at {ref_x:.2f} {ref_y:.2f} 0)\n')
         lines.append(f'      (effects (font (size 1.27 1.27)))\n')
         lines.append(f'    )\n')
-        lines.append(f'    (property "Value" "{comp.value}" (at {x:.2f} {y + 3.0:.2f} 0)\n')
+        lines.append(f'    (property "Value" "{comp.value}" (at {val_x:.2f} {val_y:.2f} 0)\n')
         lines.append(f'      (effects (font (size 1.27 1.27)))\n')
         lines.append(f'    )\n')
         fp_full = f"{comp.footprint_lib}:{comp.footprint_name}" if comp.footprint_lib else ""
-        lines.append(f'    (property "Footprint" "{fp_full}" (at {x:.2f} {y + 5.0:.2f} 0)\n')
+        lines.append(f'    (property "Footprint" "{fp_full}" (at {fp_x:.2f} {fp_y:.2f} 0)\n')
         lines.append(f'      (effects (font (size 1.27 1.27)) hide)\n')
         lines.append(f'    )\n')
         lines.append(f'    (instances\n')
@@ -395,7 +425,7 @@ class KicadSchWriter:
         lines.append(f'  )\n')
 
     def _collect_pin_positions(self, comp: ComponentPlacement,
-                               sym_x: float, sym_y: float,
+                               sym_x: float, sym_y: float, rotation: float,
                                pin_positions: dict[str, list[tuple[float, float]]]) -> None:
         """Determine where each pin's connection point lands in schematic coords."""
         if not comp.pad_nets:
@@ -407,13 +437,20 @@ class KicadSchWriter:
             # Placeholder symbol: pin 1 at left (-5.08, 0), pin 2 at right (5.08, 0)
             pins = {"1": (-5.08, 0.0), "2": (5.08, 0.0)}
 
+        rad = math.radians(rotation)
+        cos_r, sin_r = math.cos(rad), math.sin(rad)
         for pad_num, net_name in comp.pad_nets.items():
             if not net_name:
                 continue
             if pad_num in pins:
                 px, py = pins[pad_num]
-                scene_x = sym_x + px
-                scene_y = sym_y + py
+                # Symbol pin coords use Y-up; schematic uses Y-down → flip py
+                py = -py
+                # Rotate pin offset by symbol rotation
+                rpx = px * cos_r - py * sin_r
+                rpy = px * sin_r + py * cos_r
+                scene_x = sym_x + rpx
+                scene_y = sym_y + rpy
                 pin_positions.setdefault(net_name, []).append((scene_x, scene_y))
 
     @staticmethod
@@ -476,7 +513,7 @@ class KicadProjectWriter:
         pro_data = {
             "meta": {
                 "filename": pro_path.name,
-                "version": 2
+                "version": 3
             },
             "board": {
                 "design_settings": {"defaults": {}},
@@ -509,7 +546,7 @@ class KicadProjectWriter:
                         "wire_width": 6,
                     }
                 ],
-                "meta": {"version": 3},
+                "meta": {"version": 4},
                 "net_colors": {},
             },
             "pcbnew": {"last_paths": {"gencad": "", "idf": "", "netlist": "", "plot": "", "pos_files": "", "specctra_dsn": "", "step": "", "vrml": ""}},

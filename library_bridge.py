@@ -44,14 +44,14 @@ def detect_kicad_base() -> Optional[Path]:
 
 def default_footprint_paths() -> list[Path]:
     """Return auto-detected footprint library directories."""
-    base = detect_kicad_base()
+    # base = detect_kicad_base()  # DEBUG: standardní knihovny dočasně vypnuty
     paths: list[Path] = []
-    if base:
-        for sub in ("share/kicad/footprints", "footprints"):
-            fp_dir = base / sub
-            if fp_dir.is_dir():
-                paths.append(fp_dir)
-                break
+    # if base:
+    #     for sub in ("share/kicad/footprints", "footprints"):
+    #         fp_dir = base / sub
+    #         if fp_dir.is_dir():
+    #             paths.append(fp_dir)
+    #             break
     if os.name == "nt":
         user_fp = Path(os.path.expandvars(r"%USERPROFILE%\Documents\KiCad\9.0\footprints"))
     else:
@@ -63,14 +63,14 @@ def default_footprint_paths() -> list[Path]:
 
 def default_symbol_paths() -> list[Path]:
     """Return auto-detected symbol library directories."""
-    base = detect_kicad_base()
+    # base = detect_kicad_base()  # DEBUG: standardní knihovny dočasně vypnuty
     paths: list[Path] = []
-    if base:
-        for sub in ("share/kicad/symbols", "symbols"):
-            sym_dir = base / sub
-            if sym_dir.is_dir():
-                paths.append(sym_dir)
-                break
+    # if base:
+    #     for sub in ("share/kicad/symbols", "symbols"):
+    #         sym_dir = base / sub
+    #         if sym_dir.is_dir():
+    #             paths.append(sym_dir)
+    #             break
     if os.name == "nt":
         user_sym = Path(os.path.expandvars(r"%USERPROFILE%\Documents\KiCad\9.0\symbols"))
     else:
