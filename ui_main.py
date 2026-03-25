@@ -188,6 +188,10 @@ class LibraryBrowserWidget(QWidget):
         fp_w = QWidget()
         fp_lay = QVBoxLayout(fp_w)
         fp_lay.setContentsMargins(2, 2, 2, 2)
+        self._fp_filter = QComboBox()
+        self._fp_filter.addItem("All libraries")
+        self._fp_filter.currentIndexChanged.connect(self._on_fp_filter_changed)
+        fp_lay.addWidget(self._fp_filter)
         self._fp_search = QLineEdit()
         self._fp_search.setPlaceholderText("Search footprints…")
         self._fp_search.textChanged.connect(self._filter_fp_tree)
@@ -205,6 +209,10 @@ class LibraryBrowserWidget(QWidget):
         sym_w = QWidget()
         sym_lay = QVBoxLayout(sym_w)
         sym_lay.setContentsMargins(2, 2, 2, 2)
+        self._sym_filter = QComboBox()
+        self._sym_filter.addItem("All libraries")
+        self._sym_filter.currentIndexChanged.connect(self._on_sym_filter_changed)
+        sym_lay.addWidget(self._sym_filter)
         self._sym_search = QLineEdit()
         self._sym_search.setPlaceholderText("Search symbols…")
         self._sym_search.textChanged.connect(self._filter_sym_tree)
@@ -220,6 +228,34 @@ class LibraryBrowserWidget(QWidget):
     def populate(self) -> None:
         self._populate_fp_tree()
         self._populate_sym_tree()
+        self._update_filter_combos()
+
+    @staticmethod
+    def _detect_prefixes(lib_names: list[str]) -> list[str]:
+        """Extract unique library prefixes (text before first '_') from names."""
+        prefixes: dict[str, int] = {}
+        for name in lib_names:
+            if "_" in name:
+                prefix = name.split("_")[0] + "_"
+            else:
+                prefix = name
+            prefixes[prefix] = prefixes.get(prefix, 0) + 1
+        # Return prefixes that group at least 2 libs, sorted
+        return sorted(p for p, cnt in prefixes.items() if cnt >= 2)
+
+    def _update_filter_combos(self) -> None:
+        """Populate filter combo boxes based on discovered library prefixes."""
+        fp_libs = list(self._lib.all_footprint_libraries())
+        sym_libs = list(self._lib.all_symbol_libraries())
+
+        for combo, libs in [(self._fp_filter, fp_libs),
+                            (self._sym_filter, sym_libs)]:
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("All libraries")
+            for prefix in self._detect_prefixes(libs):
+                combo.addItem(f"{prefix}*")
+            combo.blockSignals(False)
 
     def _populate_fp_tree(self) -> None:
         self._fp_tree.clear()
@@ -245,18 +281,56 @@ class LibraryBrowserWidget(QWidget):
 
     # ---- Filtering ----
 
-    def _filter_fp_tree(self, text: str) -> None:
-        self._filter_tree(self._fp_tree, text)
+    def _on_fp_filter_changed(self) -> None:
+        self._apply_lib_filter(self._fp_tree, self._fp_filter.currentText())
+        self._filter_fp_tree(self._fp_search.text())
 
-    def _filter_sym_tree(self, text: str) -> None:
-        self._filter_tree(self._sym_tree, text)
+    def _on_sym_filter_changed(self) -> None:
+        self._apply_lib_filter(self._sym_tree, self._sym_filter.currentText())
+        self._filter_sym_tree(self._sym_search.text())
 
     @staticmethod
-    def _filter_tree(tree: QTreeWidget, text: str) -> None:
-        text = text.strip().lower()
+    def _apply_lib_filter(tree: QTreeWidget, filter_text: str) -> None:
+        """Show/hide top-level library items based on prefix filter."""
+        show_all = filter_text == "All libraries"
+        prefix = filter_text.rstrip("*") if not show_all else ""
         for i in range(tree.topLevelItemCount()):
             lib_item = tree.topLevelItem(i)
             if lib_item is None:
+                continue
+            if show_all:
+                lib_item.setHidden(False)
+                for j in range(lib_item.childCount()):
+                    child = lib_item.child(j)
+                    if child:
+                        child.setHidden(False)
+            else:
+                matches = lib_item.text(0).startswith(prefix)
+                lib_item.setHidden(not matches)
+                if matches:
+                    for j in range(lib_item.childCount()):
+                        child = lib_item.child(j)
+                        if child:
+                            child.setHidden(False)
+
+    def _filter_fp_tree(self, text: str) -> None:
+        self._filter_tree(self._fp_tree, text, self._fp_filter.currentText())
+
+    def _filter_sym_tree(self, text: str) -> None:
+        self._filter_tree(self._sym_tree, text, self._sym_filter.currentText())
+
+    @staticmethod
+    def _filter_tree(tree: QTreeWidget, text: str, lib_filter: str = "All libraries") -> None:
+        text = text.strip().lower()
+        show_all_libs = lib_filter == "All libraries"
+        prefix = lib_filter.rstrip("*") if not show_all_libs else ""
+        for i in range(tree.topLevelItemCount()):
+            lib_item = tree.topLevelItem(i)
+            if lib_item is None:
+                continue
+            # Check library prefix filter first
+            if not show_all_libs and not lib_item.text(0).startswith(prefix):
+                lib_item.setHidden(True)
                 continue
             any_visible = False
             for j in range(lib_item.childCount()):
