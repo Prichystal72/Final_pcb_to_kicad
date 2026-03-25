@@ -1,0 +1,473 @@
+(kicad_sch
+  (version 20250114)
+  (generator "pcb_to_kicad")
+  (generator_version "9.0")
+  (uuid "31c6a200-7191-484f-a04c-9747fd93228c")
+  (paper "A4")
+  (lib_symbols
+    				(symbol 00_basic:C_Polarized
+					(pin_numbers
+						(hide yes)
+					)
+					(pin_names
+						(offset 0.254)
+						(hide yes)
+					)
+					(exclude_from_sim no)
+					(in_bom yes)
+					(on_board yes)
+					(property Reference C
+						(at 0.635 2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Value C_Polarized
+						(at 0.635 -2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Footprint ~
+						(at 0 -20.32 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Datasheet https://cdn.sparkfun.com/assets/8/a/4/a/5/Kemet_Capacitor_Datasheet.pdf
+						(at 1.27 -15.24 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Description "Polarized capacitor, US symbol"
+						(at 0 -17.78 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property PROD_ID CAP-00000
+						(at 0 -12.7 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Voltage 1kV
+						(at 0 -7.62 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(property Tolerance 100%
+						(at 0 -10.16 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(property ki_keywords "SparkFun cap capacitor"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_fp_filters CP_*
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(symbol C_Polarized_0_1
+						(polyline
+							(pts
+								(xy -2.032 0.762)
+								(xy 2.032 0.762)
+							)
+							(stroke
+								(width 0.508)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy -1.778 2.286)
+								(xy -0.762 2.286)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy -1.27 1.778)
+								(xy -1.27 2.794)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(arc
+							(start -2.032 -1.27)
+							(mid 0 -0.5572)
+							(end 2.032 -1.27)
+							(stroke
+								(width 0.508)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+					)
+					(symbol C_Polarized_1_1
+						(pin passive line
+							(at 0 3.81 270)
+							(length 2.794)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "1"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 0 -3.81 90)
+							(length 3.302)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "2"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+					)
+					(embedded_fonts no)
+				)
+    				(symbol 00_basic:R
+					(pin_numbers
+						(hide yes)
+					)
+					(pin_names
+						(offset 0)
+					)
+					(exclude_from_sim no)
+					(in_bom yes)
+					(on_board yes)
+					(property Reference R
+						(at 2.032 0 90)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(property Value R
+						(at 0 0 90)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(property Footprint ""
+						(at -1.778 0 90)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Datasheet ~
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Description Resistor
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_keywords "R res resistor"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_fp_filters R_*
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(symbol R_0_1
+						(rectangle
+							(start -1.016 -2.54)
+							(end 1.016 2.54)
+							(stroke
+								(width 0.254)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+					)
+					(symbol R_1_1
+						(pin passive line
+							(at 0 3.81 270)
+							(length 1.27)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "1"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 0 -3.81 90)
+							(length 1.27)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "2"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+					)
+					(embedded_fonts no)
+				)
+    (symbol "_placeholder:U3"
+      (pin_names (offset 1.016))
+      (exclude_from_sim no)
+      (in_bom yes)
+      (on_board yes)
+      (property "Reference" "U3" (at 0 2.54 0)
+        (effects (font (size 1.27 1.27)))
+      )
+      (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 0 -2.54 0)
+        (effects (font (size 1.27 1.27)))
+      )
+      (property "Footprint" "00_basic:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 0 -5.08 0)
+        (effects (font (size 1.27 1.27)) hide)
+      )
+      (symbol "U3_0_1"
+        (rectangle (start -2.54 1.27) (end 2.54 -1.27)
+          (stroke (width 0.254) (type default))
+          (fill (type background))
+        )
+      )
+      (symbol "U3_1_1"
+        (pin passive line (at -5.08 0 0) (length 2.54)
+          (name "1" (effects (font (size 1.27 1.27))))
+          (number "1" (effects (font (size 1.27 1.27))))
+        )
+        (pin passive line (at 5.08 0 180) (length 2.54)
+          (name "2" (effects (font (size 1.27 1.27))))
+          (number "2" (effects (font (size 1.27 1.27))))
+        )
+      )
+    )
+  )
+  (symbol
+    (lib_id "00_basic:C_Polarized")
+    (at 135.89 88.90 90)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "2dd11a4e-9107-495f-b98b-d0c49d787953")
+    (property "Reference" "U1" (at 135.89 85.90 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "CP_Radial_D25.0mm_P10.00mm_SnapIn" (at 135.89 91.90 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "00_basic:CP_Radial_D25.0mm_P10.00mm_SnapIn" (at 135.89 93.90 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U1")
+          (unit 1)
+        )
+      )
+    )
+  )
+  (symbol
+    (lib_id "00_basic:R")
+    (at 132.08 121.92 90)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "7945d3fe-342a-4c6c-8c5b-a4d688428364")
+    (property "Reference" "U2" (at 132.08 118.92 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal" (at 132.08 124.92 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "00_basic:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal" (at 132.08 126.92 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U2")
+          (unit 1)
+        )
+      )
+    )
+  )
+  (symbol
+    (lib_id "_placeholder:U3")
+    (at 165.10 101.60 180)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "15044779-f229-4002-849c-b1f7f7501764")
+    (property "Reference" "U3" (at 165.10 98.60 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 165.10 104.60 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "00_basic:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 165.10 106.60 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U3")
+          (unit 1)
+        )
+      )
+    )
+  )
+  (wire (pts (xy 139.70 88.90) (xy 140.97 88.90))
+    (stroke (width 0) (type default))
+    (uuid "b457d540-faeb-41d3-b098-897b6add97f5")
+  )
+  (wire (pts (xy 140.97 88.90) (xy 140.97 121.92))
+    (stroke (width 0) (type default))
+    (uuid "6c04d1d7-e9ae-44bb-b023-730e44665d9c")
+  )
+  (wire (pts (xy 140.97 121.92) (xy 135.89 121.92))
+    (stroke (width 0) (type default))
+    (uuid "13b660c7-4df0-44e0-8ad4-e227ef42d357")
+  )
+  (wire (pts (xy 132.08 88.90) (xy 127.00 88.90))
+    (stroke (width 0) (type default))
+    (uuid "c77a512b-4b78-48a2-a8b1-c8fa408f6137")
+  )
+  (wire (pts (xy 127.00 88.90) (xy 127.00 121.92))
+    (stroke (width 0) (type default))
+    (uuid "5dac1ab1-147f-4d62-b75e-5b75e63c865a")
+  )
+  (wire (pts (xy 127.00 121.92) (xy 128.27 121.92))
+    (stroke (width 0) (type default))
+    (uuid "dbbbbf3b-8b60-451a-8d23-64a0be3aee13")
+  )
+  (wire (pts (xy 132.08 88.90) (xy 132.08 83.82))
+    (stroke (width 0) (type default))
+    (uuid "4bce4a1e-4a24-4ae0-86a6-ff08f9da96ea")
+  )
+  (wire (pts (xy 132.08 83.82) (xy 170.18 83.82))
+    (stroke (width 0) (type default))
+    (uuid "2a3ca59c-49ce-4547-869b-2fb4ff5155ef")
+  )
+  (wire (pts (xy 170.18 83.82) (xy 170.18 101.60))
+    (stroke (width 0) (type default))
+    (uuid "992f8dcf-92ed-4a85-98a6-74df42b58f29")
+  )
+)

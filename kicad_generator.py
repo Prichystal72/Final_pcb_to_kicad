@@ -562,7 +562,8 @@ class KicadProjectWriter:
     def generate(self, project_name: str, output_dir: Path,
                  components: list[ComponentPlacement],
                  board_w: float = 100.0, board_h: float = 100.0,
-                 wires: list[WirePlacement] | None = None) -> dict[str, Path]:
+                 wires: list[WirePlacement] | None = None,
+                 auto_route: bool = True) -> dict[str, Path]:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         pro_path = output_dir / f"{project_name}.kicad_pro"
@@ -586,6 +587,17 @@ class KicadProjectWriter:
                 end_ref=w.end_ref,
                 end_pad=w.end_pad,
             ))
+
+        # Auto-route: snap-to-grid + A* Manhattan routing
+        if auto_route and centered_wires:
+            try:
+                from schematic_router import SchematicRouter
+                router = SchematicRouter()
+                components, centered_wires = router.route(
+                    components, centered_wires
+                )
+            except Exception:
+                pass  # fall back to original wires on error
 
         sch_writer = KicadSchWriter()
         sch_writer.generate(components, sch_path, wires=centered_wires)
