@@ -2,6 +2,13 @@
 
 Handles .kicad_mod, .kicad_sym, .kicad_pcb, .kicad_sch file formats.
 Converts between KiCad S-expression text and nested Python lists.
+
+Public API:
+    parse_sexpr(text)       – parse S-expression string into a nested list tree
+    serialize_sexpr(tree)   – convert the nested list tree back to formatted text
+    find_node(tree, name)   – find the first child node with a given tag name
+    find_all(tree, name)    – find all child nodes with a given tag name
+    find_value(tree, name)  – get the scalar value of a named child node
 """
 
 from __future__ import annotations

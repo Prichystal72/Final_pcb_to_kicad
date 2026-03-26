@@ -26,7 +26,7 @@ from typing import Any, Optional
 from PySide6.QtCore import Qt, QPointF, Signal, QTimer, QThread, QObject
 from PySide6.QtGui import (QAction, QKeySequence, QWheelEvent, QIcon, QPen,
                             QColor, QBrush, QFont, QUndoCommand, QUndoStack,
-                            QPainter, QPainterPath)
+                            QPainter, QPainterPath, QImage, QPixmap)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -58,6 +58,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -75,9 +76,11 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
 )
 
+from config_manager import ConfigManager
 from coordinate_system import CoordinateSystem
 from footprint_item import FootprintItem
-from image_engine import ImageEngine
+from image_editor import ImageEditorDialog, apply_pipeline, _load_with_exif, _qimage_to_numpy, _numpy_to_qimage, DEFAULT_PARAMS
+from image_engine import ImageEngine, ImageLayer
 from kicad_project import KiCadProjectManager
 from library_bridge import LibraryBridge
 from project_manager import save_project, load_project
@@ -457,20 +460,110 @@ class PropertiesPanel(QWidget):
         self._chk_top.setChecked(True)
         img_lay.addWidget(self._chk_top)
 
+        # Top layer opacity + brightness
+        top_ctl = QHBoxLayout()
+        top_ctl.addWidget(QLabel("Top opa:"))
+        self._sl_top_opacity = QSlider(Qt.Orientation.Horizontal)
+        self._sl_top_opacity.setRange(0, 100)
+        self._sl_top_opacity.setValue(100)
+        top_ctl.addWidget(self._sl_top_opacity)
+        top_ctl.addWidget(QLabel("bri:"))
+        self._sl_top_brightness = QSlider(Qt.Orientation.Horizontal)
+        self._sl_top_brightness.setRange(-100, 100)
+        self._sl_top_brightness.setValue(0)
+        top_ctl.addWidget(self._sl_top_brightness)
+        img_lay.addLayout(top_ctl)
+
         self._chk_bot = QCheckBox("Bottom layer visible")
         self._chk_bot.setChecked(True)
         img_lay.addWidget(self._chk_bot)
 
-        img_lay.addWidget(QLabel("Bottom opacity:"))
-        self._opacity = QSlider(Qt.Orientation.Horizontal)
-        self._opacity.setRange(0, 100)
-        self._opacity.setValue(50)
-        img_lay.addWidget(self._opacity)
+        # Bottom layer opacity + brightness
+        bot_ctl = QHBoxLayout()
+        bot_ctl.addWidget(QLabel("Bot opa:"))
+        self._sl_bot_opacity = QSlider(Qt.Orientation.Horizontal)
+        self._sl_bot_opacity.setRange(0, 100)
+        self._sl_bot_opacity.setValue(50)
+        bot_ctl.addWidget(self._sl_bot_opacity)
+        bot_ctl.addWidget(QLabel("bri:"))
+        self._sl_bot_brightness = QSlider(Qt.Orientation.Horizontal)
+        self._sl_bot_brightness.setRange(-100, 100)
+        self._sl_bot_brightness.setValue(0)
+        bot_ctl.addWidget(self._sl_bot_brightness)
+        img_lay.addLayout(bot_ctl)
 
         self._chk_mirror = QCheckBox("Mirror bottom")
         img_lay.addWidget(self._chk_mirror)
 
         layout.addWidget(img_grp)
+
+        # ---- Both-layer scale — prominent, top-level group ----
+        joint_grp = QGroupBox("Background Scale (both layers)")
+        joint_form = QFormLayout(joint_grp)
+        self._spin_joint_scale = QDoubleSpinBox()
+        self._spin_joint_scale.setRange(0.05, 10.0)
+        self._spin_joint_scale.setSingleStep(0.01)
+        self._spin_joint_scale.setDecimals(3)
+        self._spin_joint_scale.setValue(1.0)
+        joint_form.addRow("Scale:", self._spin_joint_scale)
+        layout.addWidget(joint_grp)
+
+        # ---- Fine alignment controls ----
+        align_grp = QGroupBox("Layer Alignment")
+        align_form = QFormLayout(align_grp)
+
+        # Active layer selector for alignment
+        self._align_layer = QComboBox()
+        self._align_layer.addItems(["Top", "Bottom"])
+        align_form.addRow("Align layer:", self._align_layer)
+
+        # X/Y offset
+        self._spin_off_x = QDoubleSpinBox()
+        self._spin_off_x.setRange(-10000, 10000)
+        self._spin_off_x.setSingleStep(1.0)
+        self._spin_off_x.setDecimals(1)
+        self._spin_off_x.setSuffix(" px")
+        align_form.addRow("Offset X:", self._spin_off_x)
+
+        self._spin_off_y = QDoubleSpinBox()
+        self._spin_off_y.setRange(-10000, 10000)
+        self._spin_off_y.setSingleStep(1.0)
+        self._spin_off_y.setDecimals(1)
+        self._spin_off_y.setSuffix(" px")
+        align_form.addRow("Offset Y:", self._spin_off_y)
+
+        # Scale per layer
+        self._spin_scale = QDoubleSpinBox()
+        self._spin_scale.setRange(0.05, 10.0)
+        self._spin_scale.setSingleStep(0.01)
+        self._spin_scale.setDecimals(3)
+        self._spin_scale.setValue(1.0)
+        align_form.addRow("Scale:", self._spin_scale)
+
+        # Nudge step
+        self._spin_nudge = QDoubleSpinBox()
+        self._spin_nudge.setRange(0.5, 100.0)
+        self._spin_nudge.setSingleStep(0.5)
+        self._spin_nudge.setValue(5.0)
+        self._spin_nudge.setSuffix(" px")
+        align_form.addRow("Nudge step:", self._spin_nudge)
+
+        # Nudge buttons
+        nudge_row = QHBoxLayout()
+        self._btn_nudge_l = QPushButton("←")
+        self._btn_nudge_r = QPushButton("→")
+        self._btn_nudge_u = QPushButton("↑")
+        self._btn_nudge_d = QPushButton("↓")
+        for b in (self._btn_nudge_l, self._btn_nudge_r, self._btn_nudge_u, self._btn_nudge_d):
+            b.setFixedWidth(32)
+        nudge_row.addWidget(self._btn_nudge_l)
+        nudge_row.addWidget(self._btn_nudge_u)
+        nudge_row.addWidget(self._btn_nudge_d)
+        nudge_row.addWidget(self._btn_nudge_r)
+        nudge_row.addStretch()
+        align_form.addRow("Nudge:", nudge_row)
+
+        layout.addWidget(align_grp)
         layout.addStretch()
 
     # Public helpers exposed for MainWindow
@@ -483,12 +576,64 @@ class PropertiesPanel(QWidget):
         return self._chk_bot
 
     @property
-    def opacity_slider(self) -> QSlider:
-        return self._opacity
+    def sl_top_opacity(self) -> QSlider:
+        return self._sl_top_opacity
+
+    @property
+    def sl_top_brightness(self) -> QSlider:
+        return self._sl_top_brightness
+
+    @property
+    def sl_bot_opacity(self) -> QSlider:
+        return self._sl_bot_opacity
+
+    @property
+    def sl_bot_brightness(self) -> QSlider:
+        return self._sl_bot_brightness
 
     @property
     def chk_mirror(self) -> QCheckBox:
         return self._chk_mirror
+
+    @property
+    def align_layer(self) -> QComboBox:
+        return self._align_layer
+
+    @property
+    def spin_off_x(self) -> QDoubleSpinBox:
+        return self._spin_off_x
+
+    @property
+    def spin_off_y(self) -> QDoubleSpinBox:
+        return self._spin_off_y
+
+    @property
+    def spin_scale(self) -> QDoubleSpinBox:
+        return self._spin_scale
+
+    @property
+    def spin_joint_scale(self) -> QDoubleSpinBox:
+        return self._spin_joint_scale
+
+    @property
+    def spin_nudge(self) -> QDoubleSpinBox:
+        return self._spin_nudge
+
+    @property
+    def btn_nudge_l(self) -> QPushButton:
+        return self._btn_nudge_l
+
+    @property
+    def btn_nudge_r(self) -> QPushButton:
+        return self._btn_nudge_r
+
+    @property
+    def btn_nudge_u(self) -> QPushButton:
+        return self._btn_nudge_u
+
+    @property
+    def btn_nudge_d(self) -> QPushButton:
+        return self._btn_nudge_d
 
     def set_component(self, fp: Optional[FootprintItem]) -> None:
         self._updating_ui = True
@@ -1490,6 +1635,9 @@ class MainWindow(QMainWindow):
         self._history_restoring: bool = False
         self._footprints: list[FootprintItem] = []
         self._project_path: Optional[str] = None
+        self._config = ConfigManager()
+        # Image editor parameters for re-edit (top/bottom)
+        self._image_params: dict[str, dict] = {"top": {}, "bottom": {}}
 
         # Connect-nets state
         self._pending_pad: Optional[tuple[str, str]] = None
@@ -1516,8 +1664,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, lib_dock)
 
         # Right dock – properties + component list + layers
-        right_w = QWidget()
-        right_lay = QVBoxLayout(right_w)
+        right_inner = QWidget()
+        right_lay = QVBoxLayout(right_inner)
         right_lay.setContentsMargins(0, 0, 0, 0)
 
         self._props = PropertiesPanel()
@@ -1530,8 +1678,14 @@ class MainWindow(QMainWindow):
         self._layer_panel = self._create_layer_panel()
         right_lay.addWidget(self._layer_panel)
 
+        # Wrap in scroll area so the panel is scrollable when space is tight
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        right_scroll.setWidget(right_inner)
+
         right_dock = QDockWidget("Properties", self)
-        right_dock.setWidget(right_w)
+        right_dock.setWidget(right_scroll)
         right_dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, right_dock)
@@ -1748,6 +1902,10 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction("Load &Top Photo…", self._on_load_top)
         view_menu.addAction("Load &Bottom Photo…", self._on_load_bottom)
+        view_menu.addAction("Edit &Top Photo…", self._on_edit_top)
+        view_menu.addAction("Edit &Bottom Photo…", self._on_edit_bottom)
+        view_menu.addSeparator()
+        view_menu.addAction("Auto-&Align Layers", self._on_auto_align)
         view_menu.addSeparator()
 
         # Colour scheme submenu
@@ -1824,10 +1982,28 @@ class MainWindow(QMainWindow):
             lambda v: self._image_engine.top().set_visible(v))
         self._props.chk_bot.toggled.connect(
             lambda v: self._image_engine.bottom().set_visible(v))
-        self._props.opacity_slider.valueChanged.connect(
+        self._props.sl_top_opacity.valueChanged.connect(
+            lambda v: self._image_engine.top().set_opacity(v / 100.0))
+        self._props.sl_top_brightness.valueChanged.connect(
+            lambda v: self._image_engine.top().set_brightness(v))
+        self._props.sl_bot_opacity.valueChanged.connect(
             lambda v: self._image_engine.bottom().set_opacity(v / 100.0))
+        self._props.sl_bot_brightness.valueChanged.connect(
+            lambda v: self._image_engine.bottom().set_brightness(v))
         self._props.chk_mirror.toggled.connect(
             lambda v: self._image_engine.bottom().set_mirrored(v))
+
+        # Layer alignment controls
+        self._props.align_layer.currentIndexChanged.connect(
+            self._on_align_layer_switched)
+        self._props.spin_off_x.valueChanged.connect(self._on_align_offset_changed)
+        self._props.spin_off_y.valueChanged.connect(self._on_align_offset_changed)
+        self._props.spin_scale.valueChanged.connect(self._on_align_scale_changed)
+        self._props.spin_joint_scale.valueChanged.connect(self._on_joint_scale_changed)
+        self._props.btn_nudge_l.clicked.connect(lambda: self._nudge_layer(-1, 0))
+        self._props.btn_nudge_r.clicked.connect(lambda: self._nudge_layer(1, 0))
+        self._props.btn_nudge_u.clicked.connect(lambda: self._nudge_layer(0, -1))
+        self._props.btn_nudge_d.clicked.connect(lambda: self._nudge_layer(0, 1))
 
         # Wire drawing signals from the view
         self._view.wire_click.connect(self._on_wire_click)
@@ -2123,6 +2299,7 @@ class MainWindow(QMainWindow):
         self._view.scale(0.8, 0.8)
 
     def _on_fit_view(self) -> None:
+        self._scene.setSceneRect(self._scene.itemsBoundingRect())
         self._view.fitInView(
             self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
@@ -2148,12 +2325,16 @@ class MainWindow(QMainWindow):
 
     def _on_about(self) -> None:
         QMessageBox.about(
-            self, "About PCB → KiCad",
-            "<h3>PCB → KiCad – Reverse Engineering Tool</h3>"
-            "<p>Converts scanned PCB images to KiCad 9 projects.</p>"
-            "<p>Place footprints on top/bottom photos, draw wires, "
-            "link symbols, and export to KiCad.</p>"
-            "<p><b>Shortcuts:</b></p>"
+            self, "About PCB-to-KiCad",
+            "<h3>PCB-to-KiCad — Reverse Engineering Tool</h3>"
+            "<p><b>Version:</b> 1.0 beta</p>"
+            "<p><b>Author:</b> Jaroslav Přichystal</p>"
+            "<p><b>Organisation:</b> Prichy</p>"
+            "<hr>"
+            "<p>Converts scanned/photographed PCB images into KiCad 9 projects. "
+            "Place footprints on top/bottom layer photos, draw wires, "
+            "link symbols, route the schematic, and export.</p>"
+            "<p><b>Keyboard shortcuts:</b></p>"
             "<ul>"
             "<li><b>R</b> – Rotate selected component 90°</li>"
             "<li><b>W</b> – Toggle wire drawing mode</li>"
@@ -2166,10 +2347,16 @@ class MainWindow(QMainWindow):
             "</ul>")
 
     def _on_save_project_as(self) -> None:
+        start_dir = self._config.last_project_dir
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Project As", "project.p2k", "PCB-to-KiCad Project (*.p2k)")
+            self, "Save Project As", str(Path(start_dir) / "project.p2k"),
+            "PCB-to-KiCad Project (*.p2k)")
         if path:
             self._project_path = path
+            self._config.last_project_dir = str(Path(path).parent)
+            self._config.add_recent_project(path)
+            # Ensure images/ dir exists
+            ConfigManager.images_dir_for(Path(path).parent)
             self._on_save_project()
 
     # ------------------------------------------------------------------
@@ -2198,9 +2385,19 @@ class MainWindow(QMainWindow):
                 "bottom": self._image_engine.bottom().source_path,
                 "top_visible": self._props.chk_top.isChecked(),
                 "bottom_visible": self._props.chk_bot.isChecked(),
-                "bottom_opacity": self._props.opacity_slider.value(),
+                "top_opacity": self._props.sl_top_opacity.value(),
+                "top_brightness": self._props.sl_top_brightness.value(),
+                "bottom_opacity": self._props.sl_bot_opacity.value(),
+                "bottom_brightness": self._props.sl_bot_brightness.value(),
                 "bottom_mirrored": self._props.chk_mirror.isChecked(),
+                "top_offset": [self._image_engine.top().offset().x(),
+                               self._image_engine.top().offset().y()],
+                "bottom_offset": [self._image_engine.bottom().offset().x(),
+                                  self._image_engine.bottom().offset().y()],
+                "top_scale": self._image_engine.top().scale,
+                "bottom_scale": self._image_engine.bottom().scale,
             },
+            "image_params": deepcopy(self._image_params),
             "components": [fp.to_dict() for fp in self._footprints],
             "wires": [w.to_dict() for w in self._wires],
             "junctions": [j.to_dict() for j in self._junctions],
@@ -2305,14 +2502,63 @@ class MainWindow(QMainWindow):
             images = state.get("images", {})
             top_path = images.get("top", "")
             bottom_path = images.get("bottom", "")
-            if top_path:
-                self._image_engine.load_top(top_path)
-            if bottom_path:
-                self._image_engine.load_bottom(bottom_path)
+
+            # Restore image editor params first (needed for re-processing)
+            self._image_params = state.get("image_params", {"top": {}, "bottom": {}})
+
+            # Load images – if we have editor params, re-process from original
+            for side, path in [("top", top_path), ("bottom", bottom_path)]:
+                if not path:
+                    continue
+                params = self._image_params.get(side, {})
+                orig = params.get("_original_path", "")
+                loaded = False
+                if orig and Path(orig).is_file() and params:
+                    try:
+                        qimg = _load_with_exif(orig)
+                        bgr = _qimage_to_numpy(qimg)
+                        processed = apply_pipeline(bgr, params)
+                        result = _numpy_to_qimage(processed)
+                        pm = QPixmap.fromImage(result)
+                        if side == "top":
+                            self._image_engine.load_top_from_pixmap(pm, orig)
+                        else:
+                            self._image_engine.load_bottom_from_pixmap(pm, orig)
+                        loaded = True
+                    except Exception:
+                        pass
+                if not loaded:
+                    if side == "top":
+                        self._image_engine.load_top(path)
+                    else:
+                        self._image_engine.load_bottom(path)
             self._props.chk_top.setChecked(images.get("top_visible", True))
             self._props.chk_bot.setChecked(images.get("bottom_visible", True))
-            self._props.opacity_slider.setValue(images.get("bottom_opacity", 50))
+            self._props.sl_top_opacity.setValue(images.get("top_opacity", 100))
+            self._props.sl_top_brightness.setValue(images.get("top_brightness", 0))
+            self._props.sl_bot_opacity.setValue(images.get("bottom_opacity", 50))
+            self._props.sl_bot_brightness.setValue(images.get("bottom_brightness", 0))
             self._props.chk_mirror.setChecked(images.get("bottom_mirrored", False))
+
+            # Restore layer offsets/scales
+            top_off = images.get("top_offset", [0, 0])
+            bot_off = images.get("bottom_offset", [0, 0])
+            self._image_engine.top().set_offset(top_off[0], top_off[1])
+            self._image_engine.bottom().set_offset(bot_off[0], bot_off[1])
+            self._image_engine.top().set_scale(images.get("top_scale", 1.0))
+            self._image_engine.bottom().set_scale(images.get("bottom_scale", 1.0))
+
+            # Sync alignment UI spinboxes with the currently selected layer
+            cur = self._current_align_layer()
+            self._props.spin_off_x.blockSignals(True)
+            self._props.spin_off_y.blockSignals(True)
+            self._props.spin_scale.blockSignals(True)
+            self._props.spin_off_x.setValue(cur.offset().x())
+            self._props.spin_off_y.setValue(cur.offset().y())
+            self._props.spin_scale.setValue(cur.scale)
+            self._props.spin_off_x.blockSignals(False)
+            self._props.spin_off_y.blockSignals(False)
+            self._props.spin_scale.blockSignals(False)
 
             for cd in state.get("components", []):
                 self._create_footprint_from_data(cd)
@@ -2350,12 +2596,14 @@ class MainWindow(QMainWindow):
         self._clear_project_scene()
         self._net_counter = 0
         self._project_path = None
+        self._image_params = {"top": {}, "bottom": {}}
         self._undo_stack.clear()
         self._status.showMessage("New project created.")
 
     def _on_open_project(self) -> None:
+        start_dir = self._config.last_project_dir
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Project", "", "PCB-to-KiCad Project (*.p2k)")
+            self, "Open Project", start_dir, "PCB-to-KiCad Project (*.p2k)")
         if not path:
             return
         try:
@@ -2364,30 +2612,29 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Open Error", str(exc))
             return
 
-        # DEBUG: při ladění nenačítáme cesty z projektu ani nepřeskenováváme
-        # knihovny – používáme pouze uživatelské knihovny načtené při startu.
-        # fp_paths = settings.get("footprint_paths", [])
-        # sym_paths = settings.get("symbol_paths", [])
-        # if fp_paths:
-        #     self._library.set_footprint_paths(fp_paths)
-        # if sym_paths:
-        #     self._library.set_symbol_paths(sym_paths)
-        # self._library.scan()
-        # self._lib_browser.populate()
-
         self._restore_project_state(data)
 
         self._project_path = path
+        self._config.last_project_dir = str(Path(path).parent)
+        self._config.add_recent_project(path)
+        # Restore image editor params if saved
+        self._image_params = data.get("image_params", {"top": {}, "bottom": {}})
         self._undo_stack.clear()
         self._status.showMessage(f"Opened: {path}")
 
     def _on_save_project(self) -> None:
         if not self._project_path:
+            start_dir = self._config.last_project_dir
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save Project", "project.p2k", "PCB-to-KiCad Project (*.p2k)")
+                self, "Save Project", str(Path(start_dir) / "project.p2k"),
+                "PCB-to-KiCad Project (*.p2k)")
             if not path:
                 return
             self._project_path = path
+            self._config.last_project_dir = str(Path(path).parent)
+            self._config.add_recent_project(path)
+            # Ensure images/ dir exists
+            ConfigManager.images_dir_for(Path(path).parent)
 
         comps = [fp.to_dict() for fp in self._footprints]
         wire_data = [w.to_dict() for w in self._wires]
@@ -2399,6 +2646,48 @@ class MainWindow(QMainWindow):
             bot_img = str(getattr(self._image_engine.bottom(), '_source_path', '')) or ""
         except Exception:
             pass
+
+        # Copy images to project folder and save processed versions
+        if self._project_path:
+            for side, img_path in [("top", top_img), ("bottom", bot_img)]:
+                if img_path:
+                    self._copy_image_to_project(img_path, side)
+                params = self._image_params.get(side, {})
+                orig = params.get("_original_path", "")
+                if orig and Path(orig).is_file() and params:
+                    try:
+                        from image_editor import _load_with_exif, _qimage_to_numpy, apply_pipeline, _numpy_to_qimage
+                        qimg = _load_with_exif(orig)
+                        bgr = _qimage_to_numpy(qimg)
+                        processed = apply_pipeline(bgr, params)
+                        result = _numpy_to_qimage(processed)
+                        self._save_processed_image(result, side)
+                    except Exception:
+                        pass
+
+        # Serialisable image_params (strip numpy etc)
+        safe_params = {}
+        for side in ("top", "bottom"):
+            p = self._image_params.get(side, {})
+            safe_params[side] = {k: v for k, v in p.items()
+                                 if isinstance(v, (str, int, float, bool, list, tuple, type(None)))}
+
+        # Collect layer display settings for persistence
+        image_display = {
+            "top_visible": self._props.chk_top.isChecked(),
+            "bottom_visible": self._props.chk_bot.isChecked(),
+            "top_opacity": self._props.sl_top_opacity.value(),
+            "top_brightness": self._props.sl_top_brightness.value(),
+            "bottom_opacity": self._props.sl_bot_opacity.value(),
+            "bottom_brightness": self._props.sl_bot_brightness.value(),
+            "bottom_mirrored": self._props.chk_mirror.isChecked(),
+            "top_offset": [self._image_engine.top().offset().x(),
+                           self._image_engine.top().offset().y()],
+            "bottom_offset": [self._image_engine.bottom().offset().x(),
+                              self._image_engine.bottom().offset().y()],
+            "top_scale": self._image_engine.top().scale,
+            "bottom_scale": self._image_engine.bottom().scale,
+        }
 
         try:
             save_project(
@@ -2412,41 +2701,243 @@ class MainWindow(QMainWindow):
                 components=comps,
                 wires=wire_data,
                 junctions=junction_data,
+                image_params=safe_params,
+                image_display=image_display,
             )
             self._status.showMessage(f"Saved: {self._project_path}")
         except Exception as exc:
             QMessageBox.critical(self, "Save Error", str(exc))
 
     # ------------------------------------------------------------------
-    # Photo slots
+    # Photo slots (with Image Editor dialog)
     # ------------------------------------------------------------------
 
     def _image_filter(self) -> str:
         return "Images (*.png *.jpg *.jpeg *.bmp *.tiff *.tif)"
 
+    def _copy_image_to_project(self, src_path: str, side: str) -> str:
+        """Copy original image into project images/ dir.  Returns new path."""
+        if not self._project_path:
+            return src_path
+        proj_dir = Path(self._project_path).parent
+        img_dir = ConfigManager.images_dir_for(proj_dir)
+        src = Path(src_path)
+        dest = img_dir / f"{side}_original{src.suffix}"
+        if src.resolve() != dest.resolve():
+            import shutil
+            shutil.copy2(str(src), str(dest))
+        return str(dest)
+
+    def _save_processed_image(self, qimg, side: str) -> str:
+        """Save processed image into project images/ dir.  Returns path."""
+        if not self._project_path:
+            return ""
+        proj_dir = Path(self._project_path).parent
+        img_dir = ConfigManager.images_dir_for(proj_dir)
+        dest = img_dir / f"{side}_processed.png"
+        qimg.save(str(dest), "PNG")
+        return str(dest)
+
     def _on_load_top(self) -> None:
+        start_dir = self._config.last_project_dir
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Top Photo", "", self._image_filter())
-        if path:
+            self, "Open Top Photo", start_dir, self._image_filter())
+        if not path:
+            return
+        self._config.last_project_dir = str(Path(path).parent)
+        # Build template from bottom layer if loaded
+        tpl = self._get_layer_pixmap_as_qimage("bottom")
+        dlg = ImageEditorDialog(path, params=self._image_params.get("top"),
+                                layer_name="Top Layer",
+                                template_qimage=tpl, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             before_state = self._capture_project_state()
-            if self._image_engine.load_top(path):
-                self._status.showMessage(f"Top layer: {Path(path).name}")
+            result_img = dlg.result_image()
+            params = dlg.result_params()
+            self._image_params["top"] = params
+            self._image_params["top"]["_original_path"] = path
+            if result_img:
+                if self._project_path:
+                    self._copy_image_to_project(path, "top")
+                pm = QPixmap.fromImage(result_img)
+                self._image_engine.load_top_from_pixmap(pm, path)
+                self._status.showMessage(f"Top layer: {Path(path).name} (edited)")
+                self._scene.setSceneRect(self._scene.itemsBoundingRect())
                 self._view.fitInView(
                     self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
                 self._push_history_state("Load top photo", before_state)
-            else:
-                QMessageBox.warning(self, "Error", f"Failed to load: {path}")
 
     def _on_load_bottom(self) -> None:
+        if not self._image_engine.top().is_loaded:
+            reply = QMessageBox.question(
+                self, "Load Bottom",
+                "Top layer is not loaded yet. It is recommended to load Top first.\n"
+                "Continue loading Bottom anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        start_dir = self._config.last_project_dir
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Bottom Photo", "", self._image_filter())
-        if path:
+            self, "Open Bottom Photo", start_dir, self._image_filter())
+        if not path:
+            return
+        self._config.last_project_dir = str(Path(path).parent)
+        tpl = self._get_layer_pixmap_as_qimage("top")
+        dlg = ImageEditorDialog(path, params=self._image_params.get("bottom"),
+                                layer_name="Bottom Layer",
+                                template_qimage=tpl, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             before_state = self._capture_project_state()
-            if self._image_engine.load_bottom(path):
-                self._status.showMessage(f"Bottom layer: {Path(path).name}")
+            result_img = dlg.result_image()
+            params = dlg.result_params()
+            self._image_params["bottom"] = params
+            self._image_params["bottom"]["_original_path"] = path
+            if result_img:
+                if self._project_path:
+                    self._copy_image_to_project(path, "bottom")
+                pm = QPixmap.fromImage(result_img)
+                self._image_engine.load_bottom_from_pixmap(pm, path)
+                self._status.showMessage(f"Bottom layer: {Path(path).name} (edited)")
+                self._scene.setSceneRect(self._scene.itemsBoundingRect())
                 self._push_history_state("Load bottom photo", before_state)
-            else:
-                QMessageBox.warning(self, "Error", f"Failed to load: {path}")
+
+    def _on_edit_top(self) -> None:
+        """Re-edit top photo with saved parameters."""
+        params = self._image_params.get("top", {})
+        orig = params.get("_original_path", "")
+        if not orig or not Path(orig).is_file():
+            QMessageBox.information(self, "Edit", "No top photo loaded yet. Use Load Top Photo first.")
+            return
+        tpl = self._get_layer_pixmap_as_qimage("bottom")
+        dlg = ImageEditorDialog(orig, params=params, layer_name="Top Layer",
+                                template_qimage=tpl, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            before_state = self._capture_project_state()
+            result_img = dlg.result_image()
+            new_params = dlg.result_params()
+            new_params["_original_path"] = orig
+            self._image_params["top"] = new_params
+            if result_img:
+                pm = QPixmap.fromImage(result_img)
+                self._image_engine.load_top_from_pixmap(pm, orig)
+                self._status.showMessage("Top photo re-edited")
+                self._scene.setSceneRect(self._scene.itemsBoundingRect())
+                self._push_history_state("Edit top photo", before_state)
+
+    def _on_edit_bottom(self) -> None:
+        """Re-edit bottom photo with saved parameters."""
+        params = self._image_params.get("bottom", {})
+        orig = params.get("_original_path", "")
+        if not orig or not Path(orig).is_file():
+            QMessageBox.information(self, "Edit", "No bottom photo loaded yet. Use Load Bottom Photo first.")
+            return
+        tpl = self._get_layer_pixmap_as_qimage("top")
+        dlg = ImageEditorDialog(orig, params=params, layer_name="Bottom Layer",
+                                template_qimage=tpl, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            before_state = self._capture_project_state()
+            result_img = dlg.result_image()
+            new_params = dlg.result_params()
+            new_params["_original_path"] = orig
+            self._image_params["bottom"] = new_params
+            if result_img:
+                pm = QPixmap.fromImage(result_img)
+                self._image_engine.load_bottom_from_pixmap(pm, orig)
+                self._status.showMessage("Bottom photo re-edited")
+                self._scene.setSceneRect(self._scene.itemsBoundingRect())
+                self._push_history_state("Edit bottom photo", before_state)
+
+    def _get_layer_pixmap_as_qimage(self, side: str) -> QImage | None:
+        """Get current layer pixmap as QImage for use as template overlay."""
+        layer = self._image_engine.top() if side == "top" else self._image_engine.bottom()
+        if not layer.is_loaded:
+            return None
+        pm = layer._source_pixmap
+        if pm is None or pm.isNull():
+            return None
+        return pm.toImage()
+
+    # -- layer alignment slots -----------------------------------------
+
+    def _current_align_layer(self) -> ImageLayer:
+        from image_engine import LayerRole
+        if self._props.align_layer.currentIndex() == 0:
+            return self._image_engine.top()
+        return self._image_engine.bottom()
+
+    def _on_align_layer_switched(self) -> None:
+        """Sync spinboxes to the currently selected align layer."""
+        layer = self._current_align_layer()
+        self._props.spin_off_x.blockSignals(True)
+        self._props.spin_off_y.blockSignals(True)
+        self._props.spin_scale.blockSignals(True)
+        self._props.spin_off_x.setValue(layer.offset().x())
+        self._props.spin_off_y.setValue(layer.offset().y())
+        self._props.spin_scale.setValue(layer.scale)
+        self._props.spin_off_x.blockSignals(False)
+        self._props.spin_off_y.blockSignals(False)
+        self._props.spin_scale.blockSignals(False)
+
+    def _on_align_offset_changed(self) -> None:
+        layer = self._current_align_layer()
+        layer.set_offset(self._props.spin_off_x.value(),
+                         self._props.spin_off_y.value())
+
+    def _on_align_scale_changed(self) -> None:
+        layer = self._current_align_layer()
+        layer.set_scale(self._props.spin_scale.value())
+        # Recalculate scene bounds so fit/zoom works with the new scale
+        self._scene.setSceneRect(self._scene.itemsBoundingRect())
+
+    def _on_joint_scale_changed(self) -> None:
+        """Scale both layers together (proportionally from their current ratio)."""
+        joint = self._props.spin_joint_scale.value()
+        self._image_engine.top().set_scale(joint)
+        self._image_engine.bottom().set_scale(joint)
+        # Sync per-layer spinbox to match the currently selected layer
+        self._props.spin_scale.blockSignals(True)
+        self._props.spin_scale.setValue(self._current_align_layer().scale)
+        self._props.spin_scale.blockSignals(False)
+        # Recalculate scene bounds so fit/zoom works with the new scale
+        self._scene.setSceneRect(self._scene.itemsBoundingRect())
+
+    def _nudge_layer(self, dx_sign: int, dy_sign: int) -> None:
+        step = self._props.spin_nudge.value()
+        layer = self._current_align_layer()
+        cur = layer.offset()
+        layer.set_offset(cur.x() + dx_sign * step,
+                         cur.y() + dy_sign * step)
+        self._props.spin_off_x.blockSignals(True)
+        self._props.spin_off_y.blockSignals(True)
+        self._props.spin_off_x.setValue(layer.offset().x())
+        self._props.spin_off_y.setValue(layer.offset().y())
+        self._props.spin_off_x.blockSignals(False)
+        self._props.spin_off_y.blockSignals(False)
+
+    def _on_auto_align(self) -> None:
+        """Auto-align bottom layer to top layer using ORB feature matching."""
+        if not self._image_engine.top().is_loaded or not self._image_engine.bottom().is_loaded:
+            QMessageBox.information(
+                self, "Auto-Align",
+                "Both top and bottom photos must be loaded to auto-align.")
+            return
+        reply = QMessageBox.question(
+            self, "Auto-Align Layers",
+            "Attempt to auto-align the bottom layer to the top layer using feature matching?\n\n"
+            "This will modify the bottom layer's position. You can undo this.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        before_state = self._capture_project_state()
+        ok = self._image_engine.align_layers(enabled=True)
+        if ok:
+            self._status.showMessage("Layers auto-aligned successfully")
+            self._push_history_state("Auto-align layers", before_state)
+        else:
+            QMessageBox.warning(
+                self, "Auto-Align",
+                "Auto-alignment failed. Not enough matching features found.\n"
+                "Try manual offset adjustment instead.")
 
     # ------------------------------------------------------------------
     # Component placement
@@ -2763,9 +3254,14 @@ class MainWindow(QMainWindow):
                 self, "Export", "No components placed. Add at least one footprint.")
             return
 
-        directory = QFileDialog.getExistingDirectory(self, "Choose Export Folder")
+        # Try last export dir, then KiCad projects dir
+        start_dir = self._config.last_export_dir
+        if not start_dir:
+            start_dir = self._config.last_project_dir
+        directory = QFileDialog.getExistingDirectory(self, "Choose Export Folder", start_dir)
         if not directory:
             return
+        self._config.last_export_dir = directory
 
         project_name = Path(directory).name or "pcb_project"
 

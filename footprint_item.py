@@ -2,6 +2,15 @@
 
 Parses .kicad_mod pad/line/arc/circle data and renders it as QGraphicsItems
 so that footprints appear on the PCB canvas with their real physical geometry.
+
+Each ``FootprintItem`` is a QGraphicsItemGroup containing:
+- Pads (SMD rectangles, through-hole circles, custom shapes)
+- Silkscreen lines, arcs, circles, and text (reference / value labels)
+- Courtyard outlines
+- A highlight rectangle shown when the item is selected
+
+The item supports drag-and-drop placement, 90-degree rotation, and
+serialization to/from a dict for project save/load.
 """
 
 from __future__ import annotations

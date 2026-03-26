@@ -342,6 +342,14 @@ QScrollBar::handle:horizontal {{
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0px;
 }}
+/* ---- Scroll area ---- */
+QScrollArea {{
+    background-color: transparent;
+    border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background-color: transparent;
+}}
 /* ---- Status bar ---- */
 QStatusBar {{
     background-color: {rgb(bg)};

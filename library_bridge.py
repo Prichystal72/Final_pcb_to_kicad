@@ -1,8 +1,14 @@
 """Library Bridge – discovers and manages KiCad footprint and symbol libraries.
 
-Auto-detects KiCad 9 installation paths, scans for .kicad_mod footprint files
-and .kicad_sym symbol libraries, and provides parsing of both for rendering
-and export purposes.
+Responsibilities:
+- Auto-detect KiCad 9 installation and user library paths
+- Scan directories for .kicad_mod footprint files and .kicad_sym symbol files
+- Parse footprint geometry (pads, lines, arcs, text) for canvas rendering
+- Parse symbol definitions for schematic export
+- Maintain an in-memory index of available libraries for quick lookup
+
+The bridge is initialised once at startup and shared across the application.
+Footprint and symbol data is parsed on demand and cached.
 """
 
 from __future__ import annotations
@@ -44,7 +50,7 @@ def detect_kicad_base() -> Optional[Path]:
 
 def default_footprint_paths() -> list[Path]:
     """Return auto-detected footprint library directories."""
-    # base = detect_kicad_base()  # DEBUG: standardní knihovny dočasně vypnuty
+    # base = detect_kicad_base()  # DEBUG: standard libraries temporarily disabled
     paths: list[Path] = []
     # if base:
     #     for sub in ("share/kicad/footprints", "footprints"):
@@ -63,7 +69,7 @@ def default_footprint_paths() -> list[Path]:
 
 def default_symbol_paths() -> list[Path]:
     """Return auto-detected symbol library directories."""
-    # base = detect_kicad_base()  # DEBUG: standardní knihovny dočasně vypnuty
+    # base = detect_kicad_base()  # DEBUG: standard libraries temporarily disabled
     paths: list[Path] = []
     # if base:
     #     for sub in ("share/kicad/symbols", "symbols"):

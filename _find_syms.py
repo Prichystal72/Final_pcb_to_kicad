@@ -1,4 +1,8 @@
-"""Find correct symbol names for those that were not found."""
+"""Utility script: search KiCad standard symbol libraries for symbol names.
+
+Used during development to locate correct symbol identifiers when
+mapping footprints to schematic symbols.  Not part of the main application.
+"""
 import re
 from pathlib import Path
 

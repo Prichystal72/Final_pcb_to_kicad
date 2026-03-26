@@ -1,7 +1,11 @@
-"""Wire and junction graphics items for PCB canvas.
+"""Wire and junction graphics items for the PCB canvas.
 
-Wires are drawn as white line segments that can cross freely.
-Junctions mark explicit connection points between wires.
+Wires are drawn as white line segments that represent copper traces.
+Junctions mark explicit connection points where two or more wires meet.
+
+Both items support serialization (``to_dict`` / ``from_dict``) for project
+persistence and undo/redo, as well as interactive selection and deletion
+on the canvas.
 """
 
 from __future__ import annotations

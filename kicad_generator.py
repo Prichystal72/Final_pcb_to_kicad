@@ -1,7 +1,20 @@
 """Generate KiCad 9 project files (.kicad_pro, .kicad_pcb, .kicad_sch).
 
-Produces real S-expression output with embedded footprint geometry and
-symbol definitions so that projects open cleanly in KiCad 9.
+This is the main export engine of PCB-to-KiCad.  Given a list of placed
+components (with footprint geometry, symbol binding, position, and rotation),
+plus wire/junction data and calibration settings, it produces three files
+that together form a valid KiCad 9 project:
+
+    .kicad_pro  - project metadata (created from a built-in template)
+    .kicad_pcb  - PCB layout with real footprint geometry (S-expression)
+    .kicad_sch  - schematic with symbol definitions and netlist wires
+
+Footprint and symbol S-expression data is embedded directly into the output
+files so that no external library path configuration is needed when the
+resulting project is opened in KiCad.
+
+NOTE:  PCB board export (copper fills, zones, stackup) is not yet
+implemented - only footprint placement and silkscreen geometry are written.
 """
 
 from __future__ import annotations

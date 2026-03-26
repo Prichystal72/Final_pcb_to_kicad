@@ -1,7 +1,15 @@
-"""High-level export orchestrator.
+"""High-level export orchestrator for KiCad project generation.
 
-Resolves footprint + symbol S-expression data from LibraryBridge,
-builds ComponentPlacement objects, and delegates to KicadProjectWriter.
+This module bridges the UI world (FootprintItems on a canvas) and the
+export world (KicadProjectWriter).  It:
+
+1. Collects all placed footprint items and their schematic symbol bindings
+2. Resolves footprint .kicad_mod and symbol .kicad_sym S-expression data
+   from the ``LibraryBridge``
+3. Builds ``ComponentPlacement`` objects with mm-coordinates and rotation
+4. Collects wire and junction data for the schematic
+5. Delegates to ``KicadProjectWriter`` which writes the final .kicad_pro,
+   .kicad_pcb, and .kicad_sch files
 """
 
 from __future__ import annotations

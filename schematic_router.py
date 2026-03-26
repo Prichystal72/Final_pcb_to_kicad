@@ -1,10 +1,12 @@
 """Schematic auto-router with snap-to-grid and A* Manhattan routing.
 
-Creates clean schematic layouts by:
-1. Snapping all symbol positions to 50-mil (1.27 mm) KiCad grid
-2. Resolving overlapping symbols (200 mil = 5.08 mm minimum spacing)
-3. A* pathfinding with Manhattan (90°-only) routing
-4. Priority: shortest connections routed first
+After all components are placed and exported, the schematic layout needs
+clean symbol placement and wire routing.  This module handles that by:
+
+1. Snapping all symbol positions to the 50-mil (1.27 mm) KiCad grid
+2. Resolving overlapping symbols (minimum 200 mil = 5.08 mm spacing)
+3. A* pathfinding with Manhattan (90-degree-only) routing
+4. Priority ordering: shortest connections are routed first
 
 Cost function for A*:
     * Empty cell traversal:  1
