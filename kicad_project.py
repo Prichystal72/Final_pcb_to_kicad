@@ -97,35 +97,59 @@ class KiCadProjectManager:
             )
             placements.append(cp)
 
-        # Build pad pixel-position lookup: (x_px, y_px, reference, pad_num)
-        pad_lookup: list[tuple[float, float, str, str]] = []
+        # Build pad pixel-position lookup: (x_px, y_px, reference, pad_num, uid)
+        pad_lookup: list[tuple[float, float, str, str, str]] = []
         for fp in footprints:
             ref = fp.reference
+            uid = fp.uid
             for pn in fp.pad_numbers():
                 spos = fp.pad_scene_pos(pn)
                 if spos is not None:
-                    pad_lookup.append((spos.x(), spos.y(), ref, pn))
+                    pad_lookup.append((spos.x(), spos.y(), ref, pn, uid))
 
-        def _find_pad(x_px: float, y_px: float) -> tuple[str, str]:
-            """Return (reference, pad_number) of nearest pad, or ('','')."""
+        def _find_pad(x_px: float, y_px: float) -> tuple[str, str, str]:
+            """Return (reference, pad_number, uid) of nearest pad, or ('','','')."""
             best_d = 3.0 * ppm  # 3 mm tolerance in pixels
-            ref, pad = "", ""
-            for px, py, r, p in pad_lookup:
+            ref, pad, uid = "", "", ""
+            for px, py, r, p, u in pad_lookup:
                 d = ((px - x_px) ** 2 + (py - y_px) ** 2) ** 0.5
                 if d < best_d:
                     best_d = d
-                    ref, pad = r, p
-            return ref, pad
+                    ref, pad, uid = r, p, u
+            return ref, pad, uid
 
-        # Convert wire data from pixel coords to mm, tagging pad connections
+        # Convert wire data from pixel coords to mm, tagging pad connections.
+        # Only tag TERMINAL wire endpoints (degree != 2 in wire graph)
+        # to avoid false pad matches at intermediate points that pass
+        # near components.
+        from collections import Counter
+        endpoint_degree: Counter[tuple[float, float]] = Counter()
+        for wd in (wire_data or []):
+            k1 = (round(wd.get("x1", 0.0), 1), round(wd.get("y1", 0.0), 1))
+            k2 = (round(wd.get("x2", 0.0), 1), round(wd.get("y2", 0.0), 1))
+            endpoint_degree[k1] += 1
+            endpoint_degree[k2] += 1
+
         wire_placements: list[WirePlacement] = []
         for wd in (wire_data or []):
             x1_px = wd.get("x1", 0.0)
             y1_px = wd.get("y1", 0.0)
             x2_px = wd.get("x2", 0.0)
             y2_px = wd.get("y2", 0.0)
-            s_ref, s_pad = _find_pad(x1_px, y1_px)
-            e_ref, e_pad = _find_pad(x2_px, y2_px)
+
+            k1 = (round(x1_px, 1), round(y1_px, 1))
+            k2 = (round(x2_px, 1), round(y2_px, 1))
+
+            # Degree-2 points are intermediate chain joints — skip pad tagging
+            if endpoint_degree[k1] != 2:
+                s_ref, s_pad, s_uid = _find_pad(x1_px, y1_px)
+            else:
+                s_ref, s_pad, s_uid = "", "", ""
+            if endpoint_degree[k2] != 2:
+                e_ref, e_pad, e_uid = _find_pad(x2_px, y2_px)
+            else:
+                e_ref, e_pad, e_uid = "", "", ""
+
             wp = WirePlacement(
                 x1_mm=x1_px / ppm,
                 y1_mm=y1_px / ppm,
@@ -136,6 +160,8 @@ class KiCadProjectManager:
                 start_pad=s_pad,
                 end_ref=e_ref,
                 end_pad=e_pad,
+                start_uid=s_uid,
+                end_uid=e_uid,
             )
             wire_placements.append(wp)
 

@@ -63,6 +63,8 @@ class WirePlacement:
     start_pad: str = ""   # pad number at start endpoint
     end_ref: str = ""     # component reference at end endpoint
     end_pad: str = ""     # pad number at end endpoint
+    start_uid: str = ""   # component uid at start endpoint (unique key)
+    end_uid: str = ""     # component uid at end endpoint (unique key)
 
 
 def _uuid() -> str:
@@ -318,13 +320,15 @@ class KicadSchWriter:
 
     def generate(self, components: list[ComponentPlacement],
                  output_path: Path,
-                 wires: list[WirePlacement] | None = None) -> None:
+                 wires: list[WirePlacement] | None = None,
+                 project_name: str = "") -> None:
+        root_uuid = _uuid()
         lines: list[str] = []
         lines.append('(kicad_sch\n')
         lines.append('  (version 20250114)\n')
         lines.append('  (generator "pcb_to_kicad")\n')
         lines.append('  (generator_version "9.0")\n')
-        lines.append(f'  (uuid "{_uuid()}")\n')
+        lines.append(f'  (uuid "{root_uuid}")\n')
         lines.append('  (paper "A4")\n')
 
         self._write_lib_symbols(lines, components)
@@ -332,8 +336,8 @@ class KicadSchWriter:
         # Track pin scene positions for net label generation
         # net_name -> list of (scene_x, scene_y)
         pin_positions: dict[str, list[tuple[float, float]]] = {}
-        # (reference, pad_number) -> (sch_x, sch_y) for wire endpoint lookup
-        ref_pad_to_sch: dict[tuple[str, str], tuple[float, float]] = {}
+        # (uid, pad_number) -> (sch_x, sch_y) for wire endpoint lookup
+        uid_pad_to_sch: dict[tuple[str, str], tuple[float, float]] = {}
 
         for comp in components:
             sx, sy = comp.x_mm, comp.y_mm
@@ -342,11 +346,12 @@ class KicadSchWriter:
             # Canvas uses clockwise-positive, so negate for schematic.
             canvas_rot = comp.rotation
             rot = (round(((360 - canvas_rot) % 360) / 90.0) * 90) % 360
-            self._write_symbol_instance(lines, comp, sx, sy, rot)
+            self._write_symbol_instance(lines, comp, sx, sy, rot,
+                                        project_name, root_uuid)
             # Collect pin connection points for net labels
             self._collect_pin_positions(comp, sx, sy, rot, pin_positions)
-            # Build (ref, pad) -> SCH pin position lookup
-            self._build_ref_pad_lookup(comp, sx, sy, rot, ref_pad_to_sch)
+            # Build (uid, pad) -> SCH pin position lookup
+            self._build_uid_pad_lookup(comp, sx, sy, rot, uid_pad_to_sch)
 
         # Write net labels at each pin that has a net
         for net_name, positions in pin_positions.items():
@@ -358,12 +363,15 @@ class KicadSchWriter:
         for w in (wires or []):
             x1, y1 = w.x1_mm, w.y1_mm
             x2, y2 = w.x2_mm, w.y2_mm
-            if w.start_ref and w.start_pad:
-                pin = ref_pad_to_sch.get((w.start_ref, w.start_pad))
+            # Prefer uid-based lookup; fall back to ref-based for compat
+            s_key = w.start_uid or w.start_ref
+            e_key = w.end_uid or w.end_ref
+            if s_key and w.start_pad:
+                pin = uid_pad_to_sch.get((s_key, w.start_pad))
                 if pin:
                     x1, y1 = pin
-            if w.end_ref and w.end_pad:
-                pin = ref_pad_to_sch.get((w.end_ref, w.end_pad))
+            if e_key and w.end_pad:
+                pin = uid_pad_to_sch.get((e_key, w.end_pad))
                 if pin:
                     x2, y2 = pin
             if math.hypot(x2 - x1, y2 - y1) > 0.01:
@@ -451,7 +459,8 @@ class KicadSchWriter:
         lines.append(f'    )\n')
 
     def _write_symbol_instance(self, lines: list[str], comp: ComponentPlacement,
-                               x: float, y: float, rotation: float = 0.0) -> None:
+                               x: float, y: float, rotation: float = 0.0,
+                               project_name: str = "", root_uuid: str = "") -> None:
         if comp.symbol_lib and comp.symbol_name:
             lib_id = f"{comp.symbol_lib}:{comp.symbol_name}"
         else:
@@ -482,9 +491,10 @@ class KicadSchWriter:
         lines.append(f'    (property "Footprint" "{fp_full}" (at {fp_x:.2f} {fp_y:.2f} 0)\n')
         lines.append(f'      (effects (font (size 1.27 1.27)) hide)\n')
         lines.append(f'    )\n')
+        path_str = f"/{root_uuid}" if root_uuid else "/"
         lines.append(f'    (instances\n')
-        lines.append(f'      (project ""\n')
-        lines.append(f'        (path "/"\n')
+        lines.append(f'      (project "{project_name}"\n')
+        lines.append(f'        (path "{path_str}"\n')
         lines.append(f'          (reference "{comp.reference}")\n')
         lines.append(f'          (unit 1)\n')
         lines.append(f'        )\n')
@@ -532,10 +542,10 @@ class KicadSchWriter:
                 scene_y = sym_y + rpy
                 pin_positions.setdefault(net_name, []).append((scene_x, scene_y))
 
-    def _build_ref_pad_lookup(self, comp: ComponentPlacement,
+    def _build_uid_pad_lookup(self, comp: ComponentPlacement,
                               sym_x: float, sym_y: float, rotation: float,
                               lookup: dict[tuple[str, str], tuple[float, float]]) -> None:
-        """Populate (reference, pad_number) → (sch_x, sch_y) for every pin."""
+        """Populate (uid, pad_number) → (sch_x, sch_y) for every pin."""
         pins = self._extract_pins_from_sexpr(comp.symbol_sexpr) if comp.symbol_sexpr.strip() else {}
         if not pins:
             pins = {"1": (-5.08, 0.0), "2": (5.08, 0.0)}
@@ -550,7 +560,7 @@ class KicadSchWriter:
             rpx = px * cos_r - py * sin_r
             rpy = px * sin_r + py * cos_r
             pad_num = pin_to_pad.get(pin_num, pin_num)
-            lookup[(comp.reference, pad_num)] = (sym_x + rpx, sym_y + rpy)
+            lookup[(comp.uid, pad_num)] = (sym_x + rpx, sym_y + rpy)
 
     @staticmethod
     def _extract_pins_from_sexpr(sexpr_text: str) -> dict[str, tuple[float, float]]:
@@ -630,6 +640,8 @@ class KicadProjectWriter:
                 start_pad=w.start_pad,
                 end_ref=w.end_ref,
                 end_pad=w.end_pad,
+                start_uid=w.start_uid,
+                end_uid=w.end_uid,
             ))
 
         # Auto-route: snap-to-grid + A* Manhattan routing
@@ -644,7 +656,8 @@ class KicadProjectWriter:
                 pass  # fall back to original wires on error
 
         sch_writer = KicadSchWriter()
-        sch_writer.generate(components, sch_path, wires=centered_wires)
+        sch_writer.generate(components, sch_path, wires=centered_wires,
+                            project_name=project_name)
 
         pro_data = {
             "meta": {

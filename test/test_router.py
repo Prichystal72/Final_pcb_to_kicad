@@ -64,6 +64,8 @@ def build_placements(data: dict) -> tuple[list[ComponentPlacement], list[WirePla
             rotation=c.get("rotation", 0.0),
             layer=c.get("layer", "F.Cu"),
             pad_nets=c.get("pad_nets", {}),
+            uid=c.get("uid", ""),
+            pin_map=c.get("pin_map", {}),
         )
         comps.append(cp)
 
@@ -90,7 +92,7 @@ def build_placements(data: dict) -> tuple[list[ComponentPlacement], list[WirePla
     # --- Build pad lookup for wire endpoint matching ---
     # For THT footprints with pitch P, pads are at local:
     #   pad 1 at (0, 0), pad 2 at (pitch_mm, 0)
-    pad_lookup: list[tuple[float, float, str, str]] = []
+    pad_lookup: list[tuple[float, float, str, str, str]] = []
     pitch_map = {
         "CP_Radial_D25.0mm_P10.00mm_SnapIn": 10.0,
         "R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal": 10.16,
@@ -104,21 +106,21 @@ def build_placements(data: dict) -> tuple[list[ComponentPlacement], list[WirePla
         px_cy = c_data["y_px"]
         ppm_val = ppm
         # Pad 1 at footprint center
-        pad_lookup.append((px_cx, px_cy, cp.reference, "1"))
+        pad_lookup.append((px_cx, px_cy, cp.reference, "1", cp.uid))
         # Pad 2 offset by pitch
         p2x = px_cx + pitch * ppm_val * math.cos(rot_rad)
         p2y = px_cy - pitch * ppm_val * math.sin(rot_rad)
-        pad_lookup.append((p2x, p2y, cp.reference, "2"))
+        pad_lookup.append((p2x, p2y, cp.reference, "2", cp.uid))
 
-    def find_pad(x_px: float, y_px: float) -> tuple[str, str]:
+    def find_pad(x_px: float, y_px: float) -> tuple[str, str, str]:
         best_d = 15.0 * ppm
-        ref, pad = "", ""
-        for px, py, r, p in pad_lookup:
+        ref, pad, uid = "", "", ""
+        for px, py, r, p, u in pad_lookup:
             d = math.hypot(px - x_px, py - y_px)
             if d < best_d:
                 best_d = d
-                ref, pad = r, p
-        return ref, pad
+                ref, pad, uid = r, p, u
+        return ref, pad, uid
 
     # --- Build centered wire placements ---
     wires: list[WirePlacement] = []
@@ -127,8 +129,8 @@ def build_placements(data: dict) -> tuple[list[ComponentPlacement], list[WirePla
         y1_px = wd.get("y1", 0)
         x2_px = wd.get("x2", 0)
         y2_px = wd.get("y2", 0)
-        s_ref, s_pad = find_pad(x1_px, y1_px)
-        e_ref, e_pad = find_pad(x2_px, y2_px)
+        s_ref, s_pad, s_uid = find_pad(x1_px, y1_px)
+        e_ref, e_pad, e_uid = find_pad(x2_px, y2_px)
         wires.append(WirePlacement(
             x1_mm=x1_px / ppm + dx,
             y1_mm=y1_px / ppm + dy,
@@ -139,6 +141,8 @@ def build_placements(data: dict) -> tuple[list[ComponentPlacement], list[WirePla
             start_pad=s_pad,
             end_ref=e_ref,
             end_pad=e_pad,
+            start_uid=s_uid,
+            end_uid=e_uid,
         ))
 
     return comps, wires

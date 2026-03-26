@@ -80,6 +80,8 @@ def main() -> None:
             footprint_sexpr=fp_sexpr,
             symbol_sexpr=sym_sexpr,
             pad_nets=comp_data.get("pad_nets", {}),
+            uid=comp_data.get("uid", ""),
+            pin_map=comp_data.get("pin_map", {}),
         )
         placements.append(cp)
 
@@ -102,32 +104,33 @@ def main() -> None:
         pitch = pitch_map.get(fp_name, 10.0)
         rot_rad = math.radians(cd.get("rotation", 0.0))
         px_cx, px_cy = cd["x_px"], cd["y_px"]
-        pad_lookup.append((px_cx, px_cy, cp.reference, "1"))
+        pad_lookup.append((px_cx, px_cy, cp.reference, "1", cp.uid))
         p2x = px_cx + pitch * ppm * math.cos(rot_rad)
         p2y = px_cy - pitch * ppm * math.sin(rot_rad)
-        pad_lookup.append((p2x, p2y, cp.reference, "2"))
+        pad_lookup.append((p2x, p2y, cp.reference, "2", cp.uid))
 
     def find_pad(x_px, y_px):
         best_d = 15.0 * ppm
-        ref, pad = "", ""
-        for px, py, r, p in pad_lookup:
+        ref, pad, uid = "", "", ""
+        for px, py, r, p, u in pad_lookup:
             d = math.hypot(px - x_px, py - y_px)
             if d < best_d:
                 best_d = d
-                ref, pad = r, p
-        return ref, pad
+                ref, pad, uid = r, p, u
+        return ref, pad, uid
 
     wire_placements: list[WirePlacement] = []
     for wd in data.get("wires", []):
         x1, y1 = wd.get("x1", 0), wd.get("y1", 0)
         x2, y2 = wd.get("x2", 0), wd.get("y2", 0)
-        s_ref, s_pad = find_pad(x1, y1)
-        e_ref, e_pad = find_pad(x2, y2)
+        s_ref, s_pad, s_uid = find_pad(x1, y1)
+        e_ref, e_pad, e_uid = find_pad(x2, y2)
         wire_placements.append(WirePlacement(
             x1_mm=x1 / ppm, y1_mm=y1 / ppm,
             x2_mm=x2 / ppm, y2_mm=y2 / ppm,
             start_ref=s_ref, start_pad=s_pad,
             end_ref=e_ref, end_pad=e_pad,
+            start_uid=s_uid, end_uid=e_uid,
         ))
 
     print(f"\nWire placements: {len(wire_placements)}")
@@ -227,6 +230,8 @@ def main() -> None:
             layer=cd.get("layer", "F.Cu"),
             footprint_sexpr=fp_sexpr2, symbol_sexpr=sym_sexpr2,
             pad_nets=cd.get("pad_nets", {}),
+            uid=cd.get("uid", ""),
+            pin_map=cd.get("pin_map", {}),
         ))
 
     pad_lookup2 = []
@@ -235,32 +240,33 @@ def main() -> None:
         pitch2 = pitch_map.get(fn, 10.0)
         rot2 = math.radians(cd.get("rotation", 0.0))
         pcx, pcy = cd["x_px"], cd["y_px"]
-        pad_lookup2.append((pcx, pcy, cp2.reference, "1"))
+        pad_lookup2.append((pcx, pcy, cp2.reference, "1", cp2.uid))
         pad_lookup2.append((pcx + pitch2 * ppm * math.cos(rot2),
                             pcy - pitch2 * ppm * math.sin(rot2),
-                            cp2.reference, "2"))
+                            cp2.reference, "2", cp2.uid))
 
     def find_pad2(xp, yp):
         best2 = 15.0 * ppm
-        r2, p2 = "", ""
-        for ppx, ppy, rr, pp in pad_lookup2:
+        r2, p2, u2 = "", "", ""
+        for ppx, ppy, rr, pp, uu in pad_lookup2:
             dd = math.hypot(ppx - xp, ppy - yp)
             if dd < best2:
                 best2 = dd
-                r2, p2 = rr, pp
-        return r2, p2
+                r2, p2, u2 = rr, pp, uu
+        return r2, p2, u2
 
     wires2 = []
     for wd in data.get("wires", []):
         wx1, wy1 = wd.get("x1", 0), wd.get("y1", 0)
         wx2, wy2 = wd.get("x2", 0), wd.get("y2", 0)
-        sr, sp = find_pad2(wx1, wy1)
-        er, ep = find_pad2(wx2, wy2)
+        sr, sp, su = find_pad2(wx1, wy1)
+        er, ep, eu = find_pad2(wx2, wy2)
         wires2.append(WirePlacement(
             x1_mm=wx1 / ppm, y1_mm=wy1 / ppm,
             x2_mm=wx2 / ppm, y2_mm=wy2 / ppm,
             start_ref=sr, start_pad=sp,
             end_ref=er, end_pad=ep,
+            start_uid=su, end_uid=eu,
         ))
 
     orig_dir = out_dir / "original"

@@ -2,7 +2,7 @@
   (version 20250114)
   (generator "pcb_to_kicad")
   (generator_version "9.0")
-  (uuid "7dc379cb-82c0-42b5-98b9-b3c5fd493c1a")
+  (uuid "22b13c73-2bd7-44ab-9a03-7afce43e6233")
   (paper "A4")
   (lib_symbols
     				(symbol RE_passive:R
@@ -702,28 +702,191 @@
         )
       )
     )
+    				(symbol RE_passive:C_Polarized
+					(pin_numbers
+						(hide yes)
+					)
+					(pin_names
+						(offset 0.254)
+					)
+					(exclude_from_sim no)
+					(in_bom yes)
+					(on_board yes)
+					(property Reference C
+						(at 0.635 2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Value C_Polarized
+						(at 0.635 -2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Footprint ""
+						(at 0.9652 -3.81 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Datasheet ~
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Description "Polarized capacitor"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_keywords "cap capacitor"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_fp_filters CP_*
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(symbol C_Polarized_0_1
+						(rectangle
+							(start -2.286 0.508)
+							(end 2.286 1.016)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy -1.778 2.286)
+								(xy -0.762 2.286)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy -1.27 2.794)
+								(xy -1.27 1.778)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(rectangle
+							(start 2.286 -0.508)
+							(end -2.286 -1.016)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type outline)
+							)
+						)
+					)
+					(symbol C_Polarized_1_1
+						(pin passive line
+							(at 0 3.81 270)
+							(length 2.794)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "1"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 0 -3.81 90)
+							(length 2.794)
+							(name ~
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number "2"
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+					)
+					(embedded_fonts no)
+				)
   )
   (symbol
     (lib_id "RE_passive:R")
-    (at 139.04 111.17 0)
+    (at 139.04 127.96 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "2aa064b1-4640-494b-948a-37f7357e0fe6")
-    (property "Reference" "U1" (at 139.04 108.17 0)
+    (uuid "9982ed8c-1a77-4b62-8891-a504de0f90f6")
+    (property "Reference" "U1" (at 139.04 124.96 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" (at 139.04 114.17 0)
+    (property "Value" "R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" (at 139.04 130.96 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "00_basic:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" (at 139.04 116.17 0)
+    (property "Footprint" "00_basic:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" (at 139.04 132.96 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
-      (project ""
-        (path "/"
+      (project "test_original"
+        (path "/22b13c73-2bd7-44ab-9a03-7afce43e6233"
           (reference "U1")
           (unit 1)
         )
@@ -732,25 +895,25 @@
   )
   (symbol
     (lib_id "RE_active:Q_NPN")
-    (at 147.33 102.95 0)
+    (at 147.33 119.74 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "af266486-e706-4bc4-95a4-d61cbe7561df")
-    (property "Reference" "U2" (at 147.33 99.95 0)
+    (uuid "1578783f-105e-4c1f-8a51-6952315973b6")
+    (property "Reference" "U2" (at 147.33 116.74 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "SOT-23" (at 147.33 105.95 0)
+    (property "Value" "SOT-23" (at 147.33 122.74 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "RE_active:SOT-23" (at 147.33 107.95 0)
+    (property "Footprint" "RE_active:SOT-23" (at 147.33 124.74 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
-      (project ""
-        (path "/"
+      (project "test_original"
+        (path "/22b13c73-2bd7-44ab-9a03-7afce43e6233"
           (reference "U2")
           (unit 1)
         )
@@ -759,25 +922,25 @@
   )
   (symbol
     (lib_id "RE_active:Q_NMOS")
-    (at 164.06 115.94 0)
+    (at 164.06 132.73 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "0e1d79fb-c396-460e-961e-e230615f9d98")
-    (property "Reference" "U3" (at 164.06 112.94 0)
+    (uuid "ac065e42-fb39-4356-973a-d78a2e4b624e")
+    (property "Reference" "U3" (at 164.06 129.73 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "TO-220-3_Horizontal_TabDown" (at 164.06 118.94 0)
+    (property "Value" "TO-220-3_Horizontal_TabDown" (at 164.06 135.73 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "RE_active:TO-220-3_Horizontal_TabDown" (at 164.06 120.94 0)
+    (property "Footprint" "RE_active:TO-220-3_Horizontal_TabDown" (at 164.06 137.73 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
-      (project ""
-        (path "/"
+      (project "test_original"
+        (path "/22b13c73-2bd7-44ab-9a03-7afce43e6233"
           (reference "U3")
           (unit 1)
         )
@@ -786,25 +949,25 @@
   )
   (symbol
     (lib_id "RE_active:Q_NPN")
-    (at 147.23 90.95 0)
+    (at 147.23 107.75 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "0883b41a-44ad-4e5d-ac4f-a4d87eee336a")
-    (property "Reference" "U4" (at 147.23 87.95 0)
+    (uuid "b4d4496a-b388-479a-ae67-2896ea75e7ec")
+    (property "Reference" "U4" (at 147.23 104.75 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "TO-92_Wide" (at 147.23 93.95 0)
+    (property "Value" "TO-92_Wide" (at 147.23 110.75 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "RE_active:TO-92_Wide" (at 147.23 95.95 0)
+    (property "Footprint" "RE_active:TO-92_Wide" (at 147.23 112.75 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
-      (project ""
-        (path "/"
+      (project "test_original"
+        (path "/22b13c73-2bd7-44ab-9a03-7afce43e6233"
           (reference "U4")
           (unit 1)
         )
@@ -813,25 +976,25 @@
   )
   (symbol
     (lib_id "_placeholder:U5")
-    (at 132.94 119.05 0)
+    (at 132.94 135.84 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "039cdd4d-5c54-49ca-b470-db37bd4d7c10")
-    (property "Reference" "U5" (at 132.94 116.05 0)
+    (uuid "4e62b575-f795-42cb-9956-7b8af71aaebe")
+    (property "Reference" "U5" (at 132.94 132.84 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 132.94 122.05 0)
+    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 132.94 138.84 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "RE_passive_tht:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 132.94 124.05 0)
+    (property "Footprint" "RE_passive_tht:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 132.94 140.84 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
-      (project ""
-        (path "/"
+      (project "test_original"
+        (path "/22b13c73-2bd7-44ab-9a03-7afce43e6233"
           (reference "U5")
           (unit 1)
         )
@@ -840,89 +1003,88 @@
   )
   (symbol
     (lib_id "_placeholder:U6")
-    (at 156.19 107.62 0)
+    (at 156.19 124.41 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "a6bb2796-3811-42ce-aebe-b9188a12d8fa")
-    (property "Reference" "U6" (at 156.19 104.62 0)
+    (uuid "e8432762-6dbe-4d1f-8eae-4b5e78656910")
+    (property "Reference" "U6" (at 156.19 121.41 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 156.19 110.62 0)
+    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 156.19 127.41 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "RE_passive_tht:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 156.19 112.62 0)
+    (property "Footprint" "RE_passive_tht:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 156.19 129.41 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
-      (project ""
-        (path "/"
+      (project "test_original"
+        (path "/22b13c73-2bd7-44ab-9a03-7afce43e6233"
           (reference "U6")
           (unit 1)
         )
       )
     )
   )
-  (wire (pts (xy 152.31 90.95) (xy 152.31 104.20))
-    (stroke (width 0) (type default))
-    (uuid "3d06e127-1f21-4c5f-b656-01c45515a31e")
+  (symbol
+    (lib_id "RE_passive:C_Polarized")
+    (at 157.54 74.16 0)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "1dec00d0-8fc2-467c-a848-23ce5dc47e3c")
+    (property "Reference" "U7" (at 157.54 71.16 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "CP_Radial_D30.0mm_P10.00mm_SnapIn" (at 157.54 77.16 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "RE_passive_tht:CP_Radial_D30.0mm_P10.00mm_SnapIn" (at 157.54 79.16 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project "test_original"
+        (path "/22b13c73-2bd7-44ab-9a03-7afce43e6233"
+          (reference "U7")
+          (unit 1)
+        )
+      )
+    )
   )
-  (wire (pts (xy 152.31 104.20) (xy 164.06 115.94))
+  (wire (pts (xy 149.77 102.67) (xy 149.87 114.66))
     (stroke (width 0) (type default))
-    (uuid "86645889-97fa-446d-80da-d0890047e024")
+    (uuid "d8d634f5-73ee-4ff2-bd5c-c3a60df13076")
   )
-  (wire (pts (xy 148.27 102.95) (xy 148.27 105.61))
+  (wire (pts (xy 149.87 114.66) (xy 166.60 127.65))
     (stroke (width 0) (type default))
-    (uuid "2ac25313-5c42-4cfa-b957-5a8203938b2f")
+    (uuid "af726cb0-4c6a-48f9-8678-adfbaf836ebd")
   )
-  (wire (pts (xy 148.27 105.61) (xy 162.68 120.02))
+  (wire (pts (xy 149.87 114.66) (xy 166.60 127.65))
     (stroke (width 0) (type default))
-    (uuid "38a660d2-406b-4733-950c-5472cc2addc2")
+    (uuid "b0ce68f0-fb74-4d99-9227-6ec2c8c63543")
   )
-  (wire (pts (xy 162.68 120.02) (xy 162.68 119.86))
+  (wire (pts (xy 149.87 114.66) (xy 142.15 107.75))
     (stroke (width 0) (type default))
-    (uuid "8c5311c7-2b17-46ae-a698-aa4977179300")
+    (uuid "5528a831-1594-4f3e-88bb-bb274978debc")
   )
-  (wire (pts (xy 162.68 119.86) (xy 166.60 115.94))
+  (wire (pts (xy 139.04 124.15) (xy 149.87 114.66))
     (stroke (width 0) (type default))
-    (uuid "ac7997c1-8ab6-48dd-b096-2c106a4e16f2")
+    (uuid "23178697-4608-4515-861c-3683b2f7f6a0")
   )
-  (wire (pts (xy 146.40 103.90) (xy 142.90 103.90))
+  (wire (pts (xy 139.04 124.15) (xy 127.86 135.84))
     (stroke (width 0) (type default))
-    (uuid "189c0829-1e79-4c95-96eb-96b032c7f493")
+    (uuid "125f6c1a-8c79-4f33-adbb-c77d73565ab4")
   )
-  (wire (pts (xy 142.90 103.90) (xy 142.82 103.97))
+  (wire (pts (xy 139.04 124.15) (xy 138.02 135.84))
     (stroke (width 0) (type default))
-    (uuid "3c217a38-19e1-46f9-bf1b-cfe8d1102405")
+    (uuid "f9c7ad1e-3a0e-4a47-975e-c6743fbfc429")
   )
-  (wire (pts (xy 142.82 103.97) (xy 142.82 91.02))
+  (wire (pts (xy 158.98 132.73) (xy 157.54 77.97))
     (stroke (width 0) (type default))
-    (uuid "8b36c443-1401-4695-8d66-ab1a809a36af")
-  )
-  (wire (pts (xy 142.82 91.02) (xy 143.02 90.82))
-    (stroke (width 0) (type default))
-    (uuid "6ffc5c7f-60e5-4f94-8890-5af0b38888c3")
-  )
-  (wire (pts (xy 143.02 90.82) (xy 147.10 90.82))
-    (stroke (width 0) (type default))
-    (uuid "f8e70c1e-5cf0-40c5-8db2-3087cadcf333")
-  )
-  (wire (pts (xy 147.10 90.82) (xy 147.23 90.95))
-    (stroke (width 0) (type default))
-    (uuid "a23709fa-f92c-4524-90ef-d04ab4c2cc01")
-  )
-  (wire (pts (xy 139.04 107.36) (xy 146.40 102.00))
-    (stroke (width 0) (type default))
-    (uuid "99bcf44a-9de7-446b-b7a3-dce76cb67e7f")
-  )
-  (wire (pts (xy 139.04 107.36) (xy 127.86 119.05))
-    (stroke (width 0) (type default))
-    (uuid "b7cba900-8e3d-49d5-aa31-cd3f71521663")
-  )
-  (wire (pts (xy 139.04 107.36) (xy 138.02 119.05))
-    (stroke (width 0) (type default))
-    (uuid "c507c39c-b151-40c3-9ec4-b6409df0bb17")
+    (uuid "8a172b14-2375-43cd-825f-1c20745e4e03")
   )
 )

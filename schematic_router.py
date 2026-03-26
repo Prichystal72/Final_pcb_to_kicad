@@ -158,6 +158,7 @@ class PinInfo:
     y: float          # schematic mm
     gx: int = 0       # grid x
     gy: int = 0       # grid y
+    uid: str = ""     # component uid (unique identifier)
 
 
 # ---------------------------------------------------------------------------
@@ -199,13 +200,13 @@ class SchematicRouter:
         # 3. Compute pin positions in schematic space
         pin_map = self._build_pin_map(components)
 
-        # Build (ref, pad) → PinInfo lookup
-        ref_pad_lookup: dict[tuple[str, str], PinInfo] = {}
+        # Build (uid, pad) → PinInfo lookup (uid is unique per component)
+        uid_pad_lookup: dict[tuple[str, str], PinInfo] = {}
         for pin in pin_map:
-            ref_pad_lookup[(pin.reference, pin.pad_number)] = pin
+            uid_pad_lookup[(pin.uid, pin.pad_number)] = pin
 
         # 4. Extract net topology from wire data
-        nets = self._extract_nets(wires, ref_pad_lookup)
+        nets = self._extract_nets(wires, uid_pad_lookup)
 
         if not nets:
             return components, []
@@ -327,8 +328,10 @@ class SchematicRouter:
         """Compute all pin positions in schematic space.
 
         Uses ``comp.pin_map`` (pin_number → pad_number) so that the
-        lookup key ``(reference, pad_number)`` matches WirePlacement
+        lookup key ``(uid, pad_number)`` matches WirePlacement
         fields ``start_pad`` / ``end_pad`` which carry **pad** numbers.
+        Uses ``comp.uid`` as unique key to avoid collisions when
+        multiple components share the same reference designator.
         """
         pins: list[PinInfo] = []
         for comp in components:
@@ -362,6 +365,7 @@ class SchematicRouter:
                         y=sy,
                         gx=mm_to_grid(sx),
                         gy=mm_to_grid(sy),
+                        uid=comp.uid,
                     )
                 )
         return pins
@@ -373,11 +377,11 @@ class SchematicRouter:
     @staticmethod
     def _extract_nets(
         wires: list[WirePlacement],
-        ref_pad_lookup: dict[tuple[str, str], PinInfo],
+        uid_pad_lookup: dict[tuple[str, str], PinInfo],
     ) -> list[list[PinInfo]]:
         """Determine nets by grouping transitively-connected pads.
 
-        Uses Union-Find on (reference, pad_number) keys.
+        Uses Union-Find on (uid, pad_number) keys.
         Also groups via shared wire endpoint positions for chains that
         pass through junctions.
         """
@@ -389,7 +393,7 @@ class SchematicRouter:
         def _qpos(x: float, y: float) -> tuple[int, int]:
             return (round(x * 10), round(y * 10))
 
-        # position → set of (ref, pad)
+        # position → set of (uid, pad)
         pos_pads: dict[tuple[int, int], set[tuple[str, str]]] = {}
         # wire endpoint positions → edges between positions
         pos_edges: list[tuple[tuple[int, int], tuple[int, int]]] = []
@@ -400,10 +404,13 @@ class SchematicRouter:
             pos_pads.setdefault(p1, set())
             pos_pads.setdefault(p2, set())
 
-            if w.start_ref and w.start_pad:
-                pos_pads[p1].add((w.start_ref, w.start_pad))
-            if w.end_ref and w.end_pad:
-                pos_pads[p2].add((w.end_ref, w.end_pad))
+            # Prefer uid-based keys; fall back to ref-based for compat
+            s_uid = w.start_uid or w.start_ref
+            e_uid = w.end_uid or w.end_ref
+            if s_uid and w.start_pad:
+                pos_pads[p1].add((s_uid, w.start_pad))
+            if e_uid and w.end_pad:
+                pos_pads[p2].add((e_uid, w.end_pad))
 
             pos_edges.append((p1, p2))
 
@@ -437,8 +444,8 @@ class SchematicRouter:
         for pad_set in groups.values():
             pin_list = []
             for key in pad_set:
-                if key in ref_pad_lookup:
-                    pin_list.append(ref_pad_lookup[key])
+                if key in uid_pad_lookup:
+                    pin_list.append(uid_pad_lookup[key])
             if len(pin_list) >= 2:
                 result.append(pin_list)
 
@@ -722,9 +729,11 @@ class SchematicRouter:
             if i == 0:
                 wp.start_ref = start_pin.reference
                 wp.start_pad = start_pin.pad_number
+                wp.start_uid = start_pin.uid
             if i == n - 2:
                 wp.end_ref = end_pin.reference
                 wp.end_pad = end_pin.pad_number
+                wp.end_uid = end_pin.uid
             segments.append(wp)
 
         return segments
@@ -749,14 +758,17 @@ class SchematicRouter:
                 WirePlacement(
                     x1_mm=ax, y1_mm=ay, x2_mm=mid_x, y2_mm=mid_y,
                     start_ref=pin_a.reference, start_pad=pin_a.pad_number,
+                    start_uid=pin_a.uid,
                 )
             )
         if abs(mid_y - by) > 0.01:
             wp = WirePlacement(x1_mm=mid_x, y1_mm=mid_y, x2_mm=bx, y2_mm=by,
-                               end_ref=pin_b.reference, end_pad=pin_b.pad_number)
+                               end_ref=pin_b.reference, end_pad=pin_b.pad_number,
+                               end_uid=pin_b.uid)
             if not segs:
                 wp.start_ref = pin_a.reference
                 wp.start_pad = pin_a.pad_number
+                wp.start_uid = pin_a.uid
             segs.append(wp)
 
         if not segs:
@@ -764,7 +776,9 @@ class SchematicRouter:
                 WirePlacement(
                     x1_mm=ax, y1_mm=ay, x2_mm=bx, y2_mm=by,
                     start_ref=pin_a.reference, start_pad=pin_a.pad_number,
+                    start_uid=pin_a.uid,
                     end_ref=pin_b.reference, end_pad=pin_b.pad_number,
+                    end_uid=pin_b.uid,
                 )
             )
         return segs
