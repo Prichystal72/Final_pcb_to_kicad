@@ -17,13 +17,16 @@ Dialogs
 
 from __future__ import annotations
 
+from copy import deepcopy
+import math
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from PySide6.QtCore import Qt, QPointF, Signal, QTimer, QThread, QObject
 from PySide6.QtGui import (QAction, QKeySequence, QWheelEvent, QIcon, QPen,
-                            QColor, QBrush)
+                            QColor, QBrush, QFont, QUndoCommand, QUndoStack,
+                            QPainter, QPainterPath)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -36,7 +39,13 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
+    QGraphicsEllipseItem,
+    QGraphicsItem,
+    QGraphicsPathItem,
+    QGraphicsRectItem,
     QGraphicsScene,
+    QGraphicsSimpleTextItem,
     QGraphicsView,
     QGroupBox,
     QHBoxLayout,
@@ -51,6 +60,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QSpinBox,
+    QSplitter,
     QStatusBar,
     QTabWidget,
     QTextEdit,
@@ -60,6 +70,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QGraphicsLineItem,
+    QHeaderView,
+    QTableWidget,
+    QTableWidgetItem,
 )
 
 from coordinate_system import CoordinateSystem
@@ -91,10 +104,14 @@ class PcbGraphicsView(QGraphicsView):
             | self.renderHints().__class__.Antialiasing
             | self.renderHints().__class__.SmoothPixmapTransform
         )
-        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        # RubberBandDrag: left-drag on empty area = rubber-band selection
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         self._zoom: float = 1.0
         self._wire_draw_mode: bool = False
+        self._pan_active: bool = False
+        self._pan_start = None
 
     def set_wire_draw_mode(self, active: bool) -> None:
         self._wire_draw_mode = active
@@ -104,8 +121,8 @@ class PcbGraphicsView(QGraphicsView):
             self.setMouseTracking(True)
             self.viewport().setMouseTracking(True)
         else:
-            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-            self.unsetCursor()
+            self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             self.setMouseTracking(False)
             self.viewport().setMouseTracking(False)
 
@@ -120,8 +137,8 @@ class PcbGraphicsView(QGraphicsView):
             self.wire_click.emit(self.mapToScene(event.pos()))
             event.accept()
             return
-        # Middle-button pan even in wire draw mode
-        if self._wire_draw_mode and event.button() == Qt.MouseButton.MiddleButton:
+        # Middle-button pan (works in all modes)
+        if event.button() == Qt.MouseButton.MiddleButton:
             self._pan_active = True
             self._pan_start = event.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -135,7 +152,7 @@ class PcbGraphicsView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
-        if getattr(self, '_pan_active', False):
+        if self._pan_active:
             delta = event.pos() - self._pan_start
             self._pan_start = event.pos()
             hs = self.horizontalScrollBar()
@@ -148,9 +165,12 @@ class PcbGraphicsView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
-        if getattr(self, '_pan_active', False) and event.button() == Qt.MouseButton.MiddleButton:
+        if self._pan_active and event.button() == Qt.MouseButton.MiddleButton:
             self._pan_active = False
-            self.setCursor(Qt.CursorShape.CrossCursor)
+            if self._wire_draw_mode:
+                self.setCursor(Qt.CursorShape.CrossCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -376,12 +396,14 @@ class LibraryBrowserWidget(QWidget):
 class PropertiesPanel(QWidget):
     """Edit properties of the selected component."""
 
-    property_changed = Signal()
+    property_changed = Signal(dict, dict)
     link_symbol_requested = Signal()
+    pin_pad_mapping_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._current: Optional[FootprintItem] = None
+        self._updating_ui = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -408,6 +430,10 @@ class PropertiesPanel(QWidget):
         self._btn_link = QPushButton("Link Symbol…")
         self._btn_link.clicked.connect(self.link_symbol_requested.emit)
         form.addRow("", self._btn_link)
+
+        self._btn_pinmap = QPushButton("Pin ↔ Pad Mapping…")
+        self._btn_pinmap.clicked.connect(self.pin_pad_mapping_requested.emit)
+        form.addRow("", self._btn_pinmap)
 
         self._layer = QComboBox()
         self._layer.addItems(["F.Cu", "B.Cu"])
@@ -465,6 +491,7 @@ class PropertiesPanel(QWidget):
         return self._chk_mirror
 
     def set_component(self, fp: Optional[FootprintItem]) -> None:
+        self._updating_ui = True
         self._current = fp
         enabled = fp is not None
         self._ref.setEnabled(enabled)
@@ -472,6 +499,8 @@ class PropertiesPanel(QWidget):
         self._layer.setEnabled(enabled)
         self._rot.setEnabled(enabled)
         self._btn_link.setEnabled(enabled)
+        self._btn_pinmap.setEnabled(
+            enabled and bool(fp and (fp.symbol_full_name or fp.footprint_full_name)))
 
         if fp:
             self._ref.setText(fp.reference)
@@ -486,16 +515,20 @@ class PropertiesPanel(QWidget):
             self._fp_lbl.setText("—")
             self._sym_lbl.setText("—")
             self._rot.setValue(0)
+        self._updating_ui = False
 
     def _apply(self) -> None:
         fp = self._current
-        if not fp:
+        if not fp or self._updating_ui:
             return
+        before = fp.to_dict()
         fp.set_reference(self._ref.text())
         fp.set_value(self._val.text())
         fp.layer = self._layer.currentText()
         fp.set_rotation(self._rot.value())
-        self.property_changed.emit()
+        after = fp.to_dict()
+        if before != after:
+            self.property_changed.emit(before, after)
 
 
 # ====================================================================
@@ -670,6 +703,736 @@ class SymbolBrowserDialog(QDialog):
 
 
 # ====================================================================
+# Pin-to-Pad mapping dialog  (visual)
+# ====================================================================
+
+_ELEC_TYPE_ABBR: dict[str, str] = {
+    "input": "IN", "output": "OUT", "bidirectional": "BI",
+    "passive": "PAS", "power_in": "PWR", "power_out": "PWR",
+    "tri_state": "TRI", "open_collector": "OC", "open_emitter": "OE",
+    "unspecified": "?", "no_connect": "NC", "free": "FREE",
+}
+
+# Colours for the preview scenes
+_CLR_SYM_BODY  = QColor(0, 100, 180)
+_CLR_SYM_PIN   = QColor(0, 160, 0)
+_CLR_SYM_LABEL = QColor(220, 60, 20)
+_CLR_FP_SILK   = QColor(200, 200, 60)
+_CLR_FP_PAD    = QColor(255, 50, 50)
+_CLR_FP_LABEL  = QColor(255, 255, 255)
+_CLR_BG_DARK   = QColor(30, 30, 30)
+
+
+_CLR_HIGHLIGHT = QColor(0, 255, 255)
+
+
+class _PreviewView(QGraphicsView):
+    """Zoomable preview with deep zoom support for large pin-count parts."""
+
+    def __init__(self, scene: QGraphicsScene, parent=None):
+        super().__init__(scene, parent)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setBackgroundBrush(QBrush(_CLR_BG_DARK))
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self._zoom_level = 0  # track zoom depth
+
+    def fit(self) -> None:
+        r = self.scene().itemsBoundingRect().adjusted(-5, -5, 5, 5)
+        self.fitInView(r, Qt.AspectRatioMode.KeepAspectRatio)
+        self._zoom_level = 0
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._zoom_level == 0:
+            self.fit()
+
+    def wheelEvent(self, event: QWheelEvent):
+        if event.angleDelta().y() > 0:
+            factor = 1.30
+            self._zoom_level += 1
+        else:
+            factor = 1 / 1.30
+            self._zoom_level = max(self._zoom_level - 1, 0)
+        self.scale(factor, factor)
+
+
+def _build_symbol_scene(sym):
+    """Draw a schematic symbol from SymbolData into a QGraphicsScene.
+
+    Returns (scene, pin_items_dict) where pin_items_dict maps
+    pin_number -> list of QGraphicsItem for highlighting.
+
+    Multi-unit symbols (e.g. 74HC00 with separate gate units) are laid
+    out vertically (top to bottom) so all pins are visible without overlap.
+    """
+    sc = QGraphicsScene()
+    pin_items: dict[str, list] = {}
+    if sym is None:
+        txt = sc.addSimpleText("No symbol data")
+        txt.setBrush(QBrush(QColor(160, 160, 160)))
+        return sc, pin_items
+
+    pen_body = QPen(_CLR_SYM_BODY, 0.15)
+    pen_pin = QPen(_CLR_SYM_PIN, 0.1)
+
+    S = 1.0
+
+    # ── Detect multi-unit symbol ──
+    pin_units = {pin.unit for pin in sym.pins if pin.unit > 0}
+    is_multi = len(pin_units) > 1
+
+    # Compute per-unit VERTICAL offsets for multi-unit symbols
+    unit_offsets: dict[int, float] = {}  # unit -> y offset (in scene coords, Y-down)
+    if is_multi:
+        sorted_units = sorted(pin_units)
+        shared_rects = [r for r in sym.rectangles if r.unit == 0]
+        shared_polys = [p for p in sym.polylines if p.unit == 0]
+        shared_circs = [c for c in sym.circles if c.unit == 0]
+        gap = 4.0
+        current_y = 0.0
+        for u in sorted_units:
+            ys: list[float] = []
+            for r in shared_rects + [r for r in sym.rectangles if r.unit == u]:
+                ys.extend([-r.y1, -r.y2])  # scene Y is flipped
+            for pl in shared_polys + [p for p in sym.polylines if p.unit == u]:
+                for _px, py in pl.points:
+                    ys.append(-py)
+            for c in shared_circs + [c for c in sym.circles if c.unit == u]:
+                ys.extend([-(c.cy + c.radius), -(c.cy - c.radius)])
+            for pin in sym.pins:
+                if pin.unit == u:
+                    ys.append(-pin.y)
+                    rad_a = math.radians(pin.direction)
+                    ys.append(-pin.y - pin.length * math.sin(rad_a))
+            if ys:
+                unit_offsets[u] = current_y - min(ys)
+                current_y += (max(ys) - min(ys)) + gap
+            else:
+                unit_offsets[u] = current_y
+
+    def _oy(unit: int) -> float:
+        """Y offset in scene coordinates for a unit."""
+        return unit_offsets.get(unit, 0.0)
+
+    # ── Draw body graphics ──
+    if is_multi:
+        sorted_units = sorted(pin_units)
+        for u in sorted_units:
+            oy = _oy(u)
+            for r in sym.rectangles:
+                if r.unit in (0, u):
+                    sc.addRect(r.x1 * S, (-r.y1 * S) + oy,
+                               (r.x2 - r.x1) * S, -(r.y2 - r.y1) * S,
+                               pen_body, QBrush(QColor(0, 100, 180, 30)))
+            for pl in sym.polylines:
+                if pl.unit in (0, u):
+                    if len(pl.points) < 2:
+                        continue
+                    path = QPainterPath()
+                    path.moveTo(pl.points[0][0] * S,
+                                (-pl.points[0][1] * S) + oy)
+                    for px, py in pl.points[1:]:
+                        path.lineTo(px * S, (-py * S) + oy)
+                    sc.addPath(path, pen_body)
+            for c in sym.circles:
+                if c.unit in (0, u):
+                    r = c.radius
+                    sc.addEllipse((c.cx - r) * S, (-(c.cy + r) * S) + oy,
+                                  2 * r * S, 2 * r * S,
+                                  pen_body, QBrush(Qt.BrushStyle.NoBrush))
+    else:
+        for r in sym.rectangles:
+            sc.addRect(r.x1 * S, -r.y1 * S, (r.x2 - r.x1) * S, -(r.y2 - r.y1) * S,
+                       pen_body, QBrush(QColor(0, 100, 180, 30)))
+        for pl in sym.polylines:
+            if len(pl.points) < 2:
+                continue
+            path = QPainterPath()
+            path.moveTo(pl.points[0][0] * S, -pl.points[0][1] * S)
+            for px, py in pl.points[1:]:
+                path.lineTo(px * S, -py * S)
+            sc.addPath(path, pen_body)
+        for c in sym.circles:
+            r = c.radius
+            sc.addEllipse((c.cx - r) * S, -(c.cy + r) * S, 2 * r * S, 2 * r * S,
+                          pen_body, QBrush(Qt.BrushStyle.NoBrush))
+
+    # ── Label scale from overall scene extent ──
+    bounds = sc.itemsBoundingRect()
+    extent = max(bounds.width(), bounds.height(), 1.0)
+    target_h = extent * 0.06 if is_multi else extent * 0.10
+
+    # ── Draw pins ──
+    ref_font = QFont("Monospace", 8)
+    for pin in sym.pins:
+        items_for_pin: list = []
+        oy = _oy(pin.unit)
+        px, py = pin.x * S, (-pin.y * S) + oy
+        length = pin.length * S
+        rad = math.radians(pin.direction)
+        ex = px + length * math.cos(rad)
+        ey = py - length * math.sin(rad)
+
+        line = sc.addLine(px, py, ex, ey, pen_pin)
+        line.setZValue(1)
+        items_for_pin.append(line)
+
+        dot_r = extent * 0.012
+        dot = sc.addEllipse(px - dot_r, py - dot_r, 2 * dot_r, 2 * dot_r,
+                            QPen(Qt.PenStyle.NoPen), QBrush(_CLR_SYM_PIN))
+        dot.setZValue(2)
+        items_for_pin.append(dot)
+
+        lbl_text = pin.number
+        if pin.name and pin.name != "~" and pin.name != pin.number:
+            lbl_text = f"{pin.number} ({pin.name})"
+        lbl = sc.addSimpleText(lbl_text, ref_font)
+        lbl.setBrush(QBrush(_CLR_SYM_LABEL))
+        lbl.setZValue(3)
+        lbl_h = lbl.boundingRect().height()
+        scale = target_h / max(lbl_h, 1.0)
+        lbl.setScale(scale)
+        lbl.setPos(px + target_h * 0.2, py - target_h * 1.1)
+        items_for_pin.append(lbl)
+
+        # Highlight ring (hidden by default)
+        hl_r = extent * 0.03 if is_multi else extent * 0.06
+        hl = sc.addEllipse(px - hl_r, py - hl_r, 2 * hl_r, 2 * hl_r,
+                           QPen(_CLR_HIGHLIGHT, extent * 0.010),
+                           QBrush(QColor(0, 255, 255, 50)))
+        hl.setZValue(10)
+        hl.setVisible(False)
+        items_for_pin.append(hl)
+
+        pin_items[pin.number] = items_for_pin
+
+    # ── Unit labels for multi-unit symbols ──
+    if is_multi:
+        lbl_font = QFont("Monospace", 8)
+        for u in sorted(pin_units):
+            unit_pins = [p for p in sym.pins if p.unit == u]
+            if not unit_pins:
+                continue
+            oy = _oy(u)
+            min_y_scene = min((-p.y * S) + oy for p in unit_pins)
+            avg_x = sum(p.x * S for p in unit_pins) / len(unit_pins)
+            lbl = sc.addSimpleText(f"Unit {u}", lbl_font)
+            lbl.setBrush(QBrush(QColor(180, 180, 180)))
+            lbl.setZValue(4)
+            lbl_br = lbl.boundingRect()
+            lbl_scale = target_h * 1.2 / max(lbl_br.height(), 1.0)
+            lbl.setScale(lbl_scale)
+            lbl.setPos(avg_x - (lbl_br.width() * lbl_scale) / 2,
+                       min_y_scene - target_h * 2.5)
+
+    return sc, pin_items
+
+
+def _build_generic_symbol_scene(pad_numbers: list[str]):
+    """Build a rectangular generic-IC symbol from pad numbers.
+
+    Used when no KiCad symbol is linked (generic IC).
+    Pins are arranged evenly: left side gets the first half, right side
+    the second half, similar to a DIP package layout.
+
+    Returns (scene, pin_items_dict).
+    """
+    sc = QGraphicsScene()
+    pin_items: dict[str, list] = {}
+    if not pad_numbers:
+        txt = sc.addSimpleText("No pads")
+        txt.setBrush(QBrush(QColor(160, 160, 160)))
+        return sc, pin_items
+
+    n = len(pad_numbers)
+    half = (n + 1) // 2  # left side gets ceil(n/2)
+    left_pads = pad_numbers[:half]
+    right_pads = pad_numbers[half:]
+
+    pin_spacing = 2.54
+    pin_length = 3.0
+    body_w = 10.0
+    body_h = max(len(left_pads), len(right_pads), 1) * pin_spacing + pin_spacing
+
+    pen_body = QPen(_CLR_SYM_BODY, 0.15)
+    pen_pin = QPen(_CLR_SYM_PIN, 0.1)
+
+    # Body rectangle
+    sc.addRect(0, 0, body_w, body_h, pen_body, QBrush(QColor(0, 100, 180, 30)))
+
+    # Title
+    ref_font = QFont("Monospace", 8)
+    title = sc.addSimpleText("Generic IC", ref_font)
+    title.setBrush(QBrush(QColor(180, 180, 180)))
+    title.setZValue(3)
+    tb = title.boundingRect()
+    t_scale = (body_w * 0.8) / max(tb.width(), 1.0)
+    t_scale = min(t_scale, pin_spacing * 0.6 / max(tb.height(), 1.0))
+    title.setScale(t_scale)
+    title.setPos(body_w / 2 - (tb.width() * t_scale) / 2,
+                 -pin_spacing * 0.8)
+
+    extent = max(body_w + 2 * pin_length, body_h)
+    target_h = extent * 0.08
+    dot_r = extent * 0.015
+
+    def _draw_pin(pad_num: str, px: float, py: float,
+                  ex: float, ey: float) -> None:
+        items: list = []
+        line = sc.addLine(px, py, ex, ey, pen_pin)
+        line.setZValue(1)
+        items.append(line)
+
+        d = sc.addEllipse(px - dot_r, py - dot_r, 2 * dot_r, 2 * dot_r,
+                          QPen(Qt.PenStyle.NoPen), QBrush(_CLR_SYM_PIN))
+        d.setZValue(2)
+        items.append(d)
+
+        lbl = sc.addSimpleText(pad_num, ref_font)
+        lbl.setBrush(QBrush(_CLR_SYM_LABEL))
+        lbl.setZValue(3)
+        lbl_h = lbl.boundingRect().height()
+        scale = target_h / max(lbl_h, 1.0)
+        lbl.setScale(scale)
+        lbl.setPos(px + target_h * 0.2, py - target_h * 1.1)
+        items.append(lbl)
+
+        hl_r = extent * 0.05
+        hl = sc.addEllipse(px - hl_r, py - hl_r, 2 * hl_r, 2 * hl_r,
+                           QPen(_CLR_HIGHLIGHT, extent * 0.012),
+                           QBrush(QColor(0, 255, 255, 50)))
+        hl.setZValue(10)
+        hl.setVisible(False)
+        items.append(hl)
+
+        pin_items[pad_num] = items
+
+    # Left side pins (pointing left from body)
+    for i, pn in enumerate(left_pads):
+        y = pin_spacing + i * pin_spacing
+        _draw_pin(pn, -pin_length, y, 0, y)
+
+    # Right side pins (pointing right from body)
+    for i, pn in enumerate(right_pads):
+        y = pin_spacing + i * pin_spacing
+        _draw_pin(pn, body_w + pin_length, y, body_w, y)
+
+    return sc, pin_items
+
+
+def _build_footprint_scene(fp_data):
+    """Draw a footprint from FootprintData into a QGraphicsScene.
+
+    Returns (scene, pad_items_dict) where pad_items_dict maps
+    pad_number -> list of QGraphicsItem for highlighting.
+    """
+    sc = QGraphicsScene()
+    pad_items: dict[str, list] = {}
+    if fp_data is None:
+        txt = sc.addSimpleText("No footprint data")
+        txt.setBrush(QBrush(QColor(160, 160, 160)))
+        return sc, pad_items
+
+    pen_silk = QPen(_CLR_FP_SILK, 0.08)
+
+    for line in fp_data.lines:
+        sc.addLine(line.x1, line.y1, line.x2, line.y2, pen_silk)
+    for r in fp_data.rects:
+        sc.addRect(min(r.x1, r.x2), min(r.y1, r.y2),
+                   abs(r.x2 - r.x1), abs(r.y2 - r.y1), pen_silk)
+    for c in fp_data.circles:
+        r = c.radius
+        sc.addEllipse(c.cx - r, c.cy - r, 2 * r, 2 * r, pen_silk)
+    for poly in fp_data.polys:
+        if len(poly.points) < 2:
+            continue
+        path = QPainterPath()
+        path.moveTo(poly.points[0][0], poly.points[0][1])
+        for px, py in poly.points[1:]:
+            path.lineTo(px, py)
+        path.closeSubpath()
+        sc.addPath(path, pen_silk, QBrush(QColor(200, 200, 60, 40)))
+
+    # Label scaling from average pad size
+    avg_pad = 0.0
+    if fp_data.pads:
+        avg_pad = sum(max(p.width, p.height) for p in fp_data.pads) / len(fp_data.pads)
+    if avg_pad < 0.1:
+        avg_pad = 1.0
+    target_h = avg_pad * 0.55
+
+    # Compute overall extent for highlight rings
+    bounds = sc.itemsBoundingRect()
+    fp_extent = max(bounds.width(), bounds.height(), 1.0)
+
+    ref_font = QFont("Monospace", 8)
+
+    for pad in fp_data.pads:
+        items_for_pad: list = []
+        w, h = pad.width, pad.height
+        x, y = pad.x - w / 2, pad.y - h / 2
+        if pad.shape in ("circle", "oval"):
+            it = sc.addEllipse(x, y, w, h,
+                               QPen(_CLR_FP_PAD, 0.04),
+                               QBrush(QColor(255, 50, 50, 120)))
+        else:
+            it = sc.addRect(x, y, w, h,
+                            QPen(_CLR_FP_PAD, 0.04),
+                            QBrush(QColor(255, 50, 50, 120)))
+        it.setZValue(1)
+        items_for_pad.append(it)
+
+        lbl = sc.addSimpleText(pad.number, ref_font)
+        lbl.setBrush(QBrush(_CLR_FP_LABEL))
+        lbl.setZValue(2)
+        lbl_br = lbl.boundingRect()
+        scale = target_h / max(lbl_br.height(), 1.0)
+        if lbl_br.width() * scale > w * 1.5 and w > 0:
+            scale = min(scale, (w * 1.5) / max(lbl_br.width(), 1.0))
+        lbl.setScale(scale)
+        lbl.setPos(pad.x - (lbl_br.width() * scale) / 2,
+                   pad.y - (lbl_br.height() * scale) / 2)
+        items_for_pad.append(lbl)
+
+        # Highlight ring (hidden by default)
+        hl_r = max(w, h) * 0.75
+        hl = sc.addEllipse(pad.x - hl_r, pad.y - hl_r, 2 * hl_r, 2 * hl_r,
+                           QPen(_CLR_HIGHLIGHT, fp_extent * 0.012),
+                           QBrush(QColor(0, 255, 255, 50)))
+        hl.setZValue(10)
+        hl.setVisible(False)
+        items_for_pad.append(hl)
+
+        pad_items.setdefault(pad.number, []).extend(items_for_pad)
+
+    return sc, pad_items
+
+
+class PinPadMappingDialog(QDialog):
+    """Visual dialog for assigning symbol pins to footprint pads.
+
+    Top: two side-by-side previews (symbol + footprint) with deep zoom.
+    Bottom: mapping table with horizontal scroll.
+    Selecting a row highlights the pin on the symbol and the mapped pad
+    on the footprint.
+    """
+
+    def __init__(
+        self,
+        footprint_item: FootprintItem,
+        library: LibraryBridge,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._fp = footprint_item
+        self._lib = library
+        self._result_map: dict[str, str] = {}
+
+        self.setWindowTitle(
+            f"Pin ↔ Pad Mapping — {footprint_item.reference}"
+        )
+        self.setMinimumSize(820, 620)
+        self.resize(1060, 780)
+
+        # Fetch library data
+        self._sym_data = None
+        self._fp_data = None
+        if footprint_item.symbol_lib and footprint_item.symbol_name:
+            self._sym_data = library.parse_symbol(footprint_item.symbol_full_name)
+        if footprint_item.footprint_lib and footprint_item.footprint_name:
+            self._fp_data = library.parse_footprint(footprint_item.footprint_full_name)
+
+        # Pad numbers (compute early so _pins can use them for generic mode)
+        self._pad_numbers_early: list[str] = []
+        if self._fp_data:
+            self._pad_numbers_early = sorted(
+                {p.number for p in self._fp_data.pads},
+                key=lambda n: (n.isdigit(), int(n) if n.isdigit() else 0, n),
+            )
+        elif footprint_item.pad_numbers():
+            self._pad_numbers_early = sorted(
+                footprint_item.pad_numbers(),
+                key=lambda n: (n.isdigit(), int(n) if n.isdigit() else 0, n),
+            )
+        self._pad_numbers = self._pad_numbers_early
+
+        # Pin list
+        self._pins: list[tuple[str, str, str]] = []
+        self._generic_mode = False
+        if self._sym_data:
+            for p in self._sym_data.pins:
+                self._pins.append((p.number, p.name, p.electrical_type))
+        elif self._pad_numbers_early:
+            # Generic IC: no symbol, generate pins from pad numbers
+            self._generic_mode = True
+            for pn in self._pad_numbers_early:
+                self._pins.append((pn, f"Pad {pn}", "passive"))
+        self._pins.sort(
+            key=lambda t: (t[0].isdigit(), int(t[0]) if t[0].isdigit() else 0, t[0])
+        )
+
+        # Scene item maps for highlighting
+        self._sym_pin_items: dict[str, list] = {}
+        self._fp_pad_items: dict[str, list] = {}
+
+        self._build_ui()
+        self._load_current_mapping()
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(6, 6, 6, 6)
+
+        # Header
+        sym_label = self._fp.symbol_full_name or ("Generic IC (footprint pads)" if self._generic_mode else "—")
+        hdr = QLabel(
+            f"<span style='font-size:11pt'>"
+            f"<b>Symbol:</b> {sym_label} &nbsp;│&nbsp; "
+            f"<b>Footprint:</b> {self._fp.footprint_full_name} &nbsp;│&nbsp; "
+            f"Pins: {len(self._pins)}  Pads: {len(self._pad_numbers)}</span>"
+        )
+        hdr.setWordWrap(True)
+        root.addWidget(hdr)
+
+        # Main vertical splitter: previews (top) / table (bottom)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # ── Two preview panes side by side ──
+        preview_widget = QWidget()
+        preview_lay = QHBoxLayout(preview_widget)
+        preview_lay.setContentsMargins(0, 0, 0, 0)
+        preview_lay.setSpacing(4)
+
+        # Symbol preview
+        sym_box = QVBoxLayout()
+        sym_box.setSpacing(2)
+        if self._generic_mode:
+            sym_box.addWidget(QLabel("<b>Generic IC</b> — pad numbers as pins"))
+            self._sym_scene, self._sym_pin_items = _build_generic_symbol_scene(
+                self._pad_numbers)
+        else:
+            sym_box.addWidget(QLabel("<b>Symbol</b> — pin number (name)"))
+            self._sym_scene, self._sym_pin_items = _build_symbol_scene(self._sym_data)
+        self._sym_view = _PreviewView(self._sym_scene)
+        self._sym_view.setMinimumHeight(220)
+        sym_box.addWidget(self._sym_view, 1)
+        preview_lay.addLayout(sym_box, 1)
+
+        # Footprint preview
+        fp_box = QVBoxLayout()
+        fp_box.setSpacing(2)
+        fp_box.addWidget(QLabel("<b>Footprint</b> — pad number"))
+        self._fp_scene, self._fp_pad_items = _build_footprint_scene(self._fp_data)
+        self._fp_view = _PreviewView(self._fp_scene)
+        self._fp_view.setMinimumHeight(220)
+        fp_box.addWidget(self._fp_view, 1)
+        preview_lay.addLayout(fp_box, 1)
+
+        splitter.addWidget(preview_widget)
+
+        # ── Mapping table ──
+        table_widget = QWidget()
+        table_lay = QVBoxLayout(table_widget)
+        table_lay.setContentsMargins(0, 4, 0, 0)
+
+        self._table = QTableWidget(len(self._pins), 5)
+        self._table.setHorizontalHeaderLabels(
+            ["Pin #", "Pin Name", "Type", "→  Pad #", "Net on Pad"]
+        )
+        header = self._table.horizontalHeader()
+        assert header is not None
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setMinimumSectionSize(60)
+        self._table.setMinimumWidth(400)
+        self._table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._table.setHorizontalScrollMode(
+            QTableWidget.ScrollMode.ScrollPerPixel)
+        self._table.verticalHeader().setVisible(False)
+        self._table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setSelectionMode(
+            QTableWidget.SelectionMode.SingleSelection)
+        # Connect row selection → highlight
+        self._table.currentCellChanged.connect(self._on_row_selected)
+
+        self._combos: list[QComboBox] = []
+        for row, (pin_num, pin_name, elec_type) in enumerate(self._pins):
+            it_num = QTableWidgetItem(pin_num)
+            it_num.setFlags(it_num.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            bold = QFont()
+            bold.setBold(True)
+            it_num.setFont(bold)
+            self._table.setItem(row, 0, it_num)
+
+            it_name = QTableWidgetItem(pin_name)
+            it_name.setFlags(it_name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._table.setItem(row, 1, it_name)
+
+            abbr = _ELEC_TYPE_ABBR.get(elec_type, elec_type or "?")
+            it_type = QTableWidgetItem(abbr)
+            it_type.setFlags(it_type.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            it_type.setToolTip(elec_type)
+            self._table.setItem(row, 2, it_type)
+
+            combo = QComboBox()
+            combo.addItem("— none —", "")
+            for pn in self._pad_numbers:
+                combo.addItem(f"Pad {pn}", pn)
+            combo.currentIndexChanged.connect(self._on_combo_changed)
+            self._table.setCellWidget(row, 3, combo)
+            self._combos.append(combo)
+
+            it_net = QTableWidgetItem("")
+            it_net.setFlags(it_net.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._table.setItem(row, 4, it_net)
+
+        table_lay.addWidget(self._table)
+        splitter.addWidget(table_widget)
+
+        # Splitter: previews get 60%, table 40%
+        splitter.setStretchFactor(0, 60)
+        splitter.setStretchFactor(1, 40)
+        root.addWidget(splitter, 1)
+
+        # Button row
+        btn_row = QHBoxLayout()
+        btn_auto = QPushButton("Auto-match")
+        btn_auto.setToolTip("Match pins to pads by number")
+        btn_auto.clicked.connect(self._auto_match)
+        btn_row.addWidget(btn_auto)
+
+        btn_reset = QPushButton("Reset (1:1)")
+        btn_reset.setToolTip("Pin N → pad N identity mapping")
+        btn_reset.clicked.connect(self._reset_identity)
+        btn_row.addWidget(btn_reset)
+
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        # Warning label
+        self._warn = QLabel("")
+        self._warn.setStyleSheet("color: #cc6600; font-weight: bold;")
+        self._warn.setWordWrap(True)
+        root.addWidget(self._warn)
+
+        # OK / Cancel
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self._confirm)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+    # ── Row selection → highlight pin on symbol + pad on footprint ──
+    def _on_row_selected(self, row: int, _col: int, _prev_row: int, _prev_col: int) -> None:
+        # Hide all highlights first
+        for items in self._sym_pin_items.values():
+            for it in items:
+                if it.zValue() == 10:  # highlight ring
+                    it.setVisible(False)
+        for items in self._fp_pad_items.values():
+            for it in items:
+                if it.zValue() == 10:
+                    it.setVisible(False)
+
+        if row < 0 or row >= len(self._pins):
+            return
+
+        pin_num = self._pins[row][0]
+
+        # Highlight pin on symbol
+        if pin_num in self._sym_pin_items:
+            for it in self._sym_pin_items[pin_num]:
+                if it.zValue() == 10:
+                    it.setVisible(True)
+
+        # Highlight the mapped pad on footprint
+        combo = self._combos[row]
+        pad_num = combo.currentData()
+        if pad_num and pad_num in self._fp_pad_items:
+            for it in self._fp_pad_items[pad_num]:
+                if it.zValue() == 10:
+                    it.setVisible(True)
+
+    # ── Data logic ──
+    def _load_current_mapping(self) -> None:
+        existing = dict(self._fp.pin_map)
+        if not existing:
+            existing = {p[0]: p[0] for p in self._pins if p[0] in self._pad_numbers}
+        for row, (pin_num, _, _) in enumerate(self._pins):
+            pad = existing.get(pin_num, "")
+            combo = self._combos[row]
+            idx = combo.findData(pad)
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._refresh_nets()
+        self._check_warnings()
+
+    def _on_combo_changed(self) -> None:
+        self._refresh_nets()
+        self._check_warnings()
+        # Re-apply highlight for current row
+        row = self._table.currentRow()
+        if row >= 0:
+            self._on_row_selected(row, 0, -1, -1)
+
+    def _refresh_nets(self) -> None:
+        for row in range(len(self._pins)):
+            combo = self._combos[row]
+            pad = combo.currentData()
+            net = self._fp.pad_nets.get(pad, "") if pad else ""
+            net_item = self._table.item(row, 4)
+            if net_item:
+                net_item.setText(net or "—")
+
+    def _check_warnings(self) -> None:
+        used_pads: dict[str, list[str]] = {}
+        unmapped = []
+        for row, (pin_num, _, _) in enumerate(self._pins):
+            pad = self._combos[row].currentData()
+            if not pad:
+                unmapped.append(pin_num)
+            else:
+                used_pads.setdefault(pad, []).append(pin_num)
+        warnings = []
+        dupes = {pad: pins for pad, pins in used_pads.items() if len(pins) > 1}
+        if dupes:
+            for pad, pins in dupes.items():
+                warnings.append(f"Pad {pad} assigned to multiple pins: {', '.join(pins)}")
+        if unmapped:
+            warnings.append(f"Unmapped pins: {', '.join(unmapped)}")
+        self._warn.setText("\n".join(warnings))
+
+    def _auto_match(self) -> None:
+        for row, (pin_num, _, _) in enumerate(self._pins):
+            combo = self._combos[row]
+            idx = combo.findData(pin_num)
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._refresh_nets()
+        self._check_warnings()
+
+    def _reset_identity(self) -> None:
+        self._auto_match()
+
+    def _confirm(self) -> None:
+        self._result_map = {}
+        for row, (pin_num, _, _) in enumerate(self._pins):
+            pad = self._combos[row].currentData()
+            if pad:
+                self._result_map[pin_num] = pad
+        self.accept()
+
+    def result_pin_map(self) -> dict[str, str]:
+        return dict(self._result_map)
+
+
+# ====================================================================
 # Background library scanner
 # ====================================================================
 
@@ -684,6 +1447,27 @@ class _ScanWorker(QObject):
     def run(self) -> None:
         fp_count, sym_count = self._library.scan()
         self.finished.emit(fp_count, sym_count)
+
+
+class _ProjectSnapshotCommand(QUndoCommand):
+    """Undo/redo command based on full project state snapshots."""
+
+    def __init__(self, window: "MainWindow", text: str,
+                 before_state: dict[str, Any], after_state: dict[str, Any]) -> None:
+        super().__init__(text)
+        self._window = window
+        self._before_state = deepcopy(before_state)
+        self._after_state = deepcopy(after_state)
+        self._first_redo = True
+
+    def undo(self) -> None:
+        self._window._restore_project_state(self._before_state)
+
+    def redo(self) -> None:
+        if self._first_redo:
+            self._first_redo = False
+            return
+        self._window._restore_project_state(self._after_state)
 
 
 # ====================================================================
@@ -702,6 +1486,8 @@ class MainWindow(QMainWindow):
         self._scene.setBackgroundBrush(QBrush(cm.background()))
         self._image_engine = ImageEngine(self._scene)
         self._library = LibraryBridge()
+        self._undo_stack = QUndoStack(self)
+        self._history_restoring: bool = False
         self._footprints: list[FootprintItem] = []
         self._project_path: Optional[str] = None
 
@@ -942,6 +1728,13 @@ class MainWindow(QMainWindow):
 
         # ---- Edit ----
         edit_menu = mb.addMenu("&Edit")
+        self._act_undo = self._undo_stack.createUndoAction(self, "&Undo")
+        self._act_undo.setShortcut(QKeySequence.StandardKey.Undo)
+        edit_menu.addAction(self._act_undo)
+        self._act_redo = self._undo_stack.createRedoAction(self, "&Redo")
+        self._act_redo.setShortcut(QKeySequence.StandardKey.Redo)
+        edit_menu.addAction(self._act_redo)
+        edit_menu.addSeparator()
         self._act_delete = edit_menu.addAction(
             "&Delete Selected", self._on_delete_selected, QKeySequence.StandardKey.Delete)
         edit_menu.addSeparator()
@@ -998,6 +1791,8 @@ class MainWindow(QMainWindow):
         tb.addAction("New", self._on_new)
         tb.addAction("Open", self._on_open_project)
         tb.addAction("Save", self._on_save_project)
+        tb.addAction(self._act_undo)
+        tb.addAction(self._act_redo)
         tb.addSeparator()
         tb.addAction("Place Footprint", self._on_place_from_browser)
         tb.addSeparator()
@@ -1020,6 +1815,7 @@ class MainWindow(QMainWindow):
         self._comp_list.delete_requested.connect(self._on_delete_component)
         self._props.property_changed.connect(self._on_property_changed)
         self._props.link_symbol_requested.connect(self._on_link_symbol)
+        self._props.pin_pad_mapping_requested.connect(self._on_pin_pad_mapping)
         self._scene.selectionChanged.connect(self._on_scene_selection_changed)
         self._connect_mode: bool = False
 
@@ -1067,6 +1863,8 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def _rotate_selected(self, degrees: float) -> None:
+        before_state = self._capture_project_state()
+        changed = False
         for fp in self._footprints:
             if fp.isSelected():
                 new_rot = (fp.rotation_deg + degrees) % 360
@@ -1074,6 +1872,9 @@ class MainWindow(QMainWindow):
                 self._props.set_component(fp)
                 self._rebuild_ratsnest()
                 self._status.showMessage(f"Rotated {fp.reference} → {new_rot:.0f}°")
+                changed = True
+        if changed:
+            self._push_history_state("Rotate component", before_state)
 
     # ------------------------------------------------------------------
     # Right-click context menu
@@ -1107,6 +1908,9 @@ class MainWindow(QMainWindow):
                 clicked_fp = parent
 
         menu = QMenu(self)
+        menu.addAction(self._act_undo)
+        menu.addAction(self._act_redo)
+        menu.addSeparator()
 
         if clicked_fp:
             # Component context menu
@@ -1119,6 +1923,8 @@ class MainWindow(QMainWindow):
                            lambda: self._ctx_flip_fp(clicked_fp))
             menu.addAction("Link Symbol…",
                            lambda: self._ctx_link_symbol(clicked_fp))
+            menu.addAction("Pin ↔ Pad Mapping…",
+                           lambda: self._ctx_pin_pad_mapping(clicked_fp))
             menu.addSeparator()
             menu.addAction(f"Delete {clicked_fp.reference}",
                            lambda: self._ctx_delete_fp(clicked_fp))
@@ -1145,38 +1951,67 @@ class MainWindow(QMainWindow):
 
     # Context menu helpers
     def _ctx_rotate_fp(self, fp: FootprintItem, degrees: float) -> None:
+        before_state = self._capture_project_state()
         new_rot = (fp.rotation_deg + degrees) % 360
         fp.set_rotation(new_rot)
         self._props.set_component(fp)
         self._rebuild_ratsnest()
+        self._push_history_state("Rotate component", before_state)
 
     def _ctx_flip_fp(self, fp: FootprintItem) -> None:
+        before_state = self._capture_project_state()
         fp.layer = "B.Cu" if fp.layer == "F.Cu" else "F.Cu"
+        self._sync_footprint_visibility(fp)
         self._props.set_component(fp)
+        self._push_history_state("Flip component layer", before_state)
 
     def _ctx_link_symbol(self, fp: FootprintItem) -> None:
         fp.setSelected(True)
         self._props.set_component(fp)
         self._on_link_symbol()
 
+    def _ctx_pin_pad_mapping(self, fp: FootprintItem) -> None:
+        fp.setSelected(True)
+        self._props.set_component(fp)
+        self._on_pin_pad_mapping()
+
+    def _on_pin_pad_mapping(self) -> None:
+        """Open the Pin ↔ Pad Mapping dialog for the selected component."""
+        fp = self._selected_footprint()
+        if not fp:
+            self._status.showMessage("Select a component first.")
+            return
+        before_state = self._capture_project_state()
+        dlg = PinPadMappingDialog(fp, self._library, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            new_map = dlg.result_pin_map()
+            if new_map != fp.pin_map:
+                fp.pin_map = new_map
+                self._push_history_state("Edit pin↔pad mapping", before_state)
+                self._status.showMessage(
+                    f"Pin mapping updated for {fp.reference} "
+                    f"({len(new_map)} assignments)")
+
     def _ctx_delete_fp(self, fp: FootprintItem) -> None:
         self._on_delete_component(fp.uid)
 
     def _ctx_set_wire_net(self, wire: WireSegmentItem) -> None:
+        before_state = self._capture_project_state()
         name, ok = QInputDialog.getText(
             self, "Wire Net Name", "Net name:", text=wire.net_name)
-        if ok:
+        if ok and wire.net_name != name.strip():
             wire.net_name = name.strip()
+            self._push_history_state("Change wire net", before_state)
 
     def _ctx_delete_wire(self, wire: WireSegmentItem) -> None:
-        if wire in self._wires:
-            self._wires.remove(wire)
-        self._scene.removeItem(wire)
+        before_state = self._capture_project_state()
+        if self._remove_wire(wire):
+            self._push_history_state("Delete wire", before_state)
 
     def _ctx_delete_junction(self, junc: JunctionItem) -> None:
-        if junc in self._junctions:
-            self._junctions.remove(junc)
-        self._scene.removeItem(junc)
+        before_state = self._capture_project_state()
+        if self._remove_junction(junc):
+            self._push_history_state("Delete junction", before_state)
 
     # ------------------------------------------------------------------
     # Wire drawing
@@ -1210,6 +2045,8 @@ class MainWindow(QMainWindow):
             anchor = self._wire_anchor
             straight_first = self._wire_preview._straight_first if self._wire_preview else True
             pts = compute_45_route(anchor, snap_pos, straight_first)
+            before_state = self._capture_project_state()
+            created_any = False
 
             # Create segments between consecutive points
             for i in range(len(pts) - 1):
@@ -1218,11 +2055,15 @@ class MainWindow(QMainWindow):
                     seg = WireSegmentItem(p1.x(), p1.y(), p2.x(), p2.y())
                     self._scene.addItem(seg)
                     self._wires.append(seg)
+                    self._sync_wire_visibility(seg)
+                    created_any = True
 
             # Move anchor for next segment
             self._wire_anchor = snap_pos
             if self._wire_preview:
                 self._wire_preview.set_anchor(snap_pos)
+            if created_any:
+                self._push_history_state("Draw wire", before_state)
 
     def _on_wire_move(self, pos: QPointF) -> None:
         """Update the wire preview as mouse moves."""
@@ -1263,10 +2104,13 @@ class MainWindow(QMainWindow):
         self._add_junction_at(centre)
 
     def _add_junction_at(self, pos: QPointF) -> None:
+        before_state = self._capture_project_state()
         junc = JunctionItem(pos.x(), pos.y())
         self._scene.addItem(junc)
         self._junctions.append(junc)
+        self._sync_wire_visibility(junc)
         self._status.showMessage(f"Junction added at ({pos.x():.1f}, {pos.y():.1f})")
+        self._push_history_state("Add junction", before_state)
 
     # ------------------------------------------------------------------
     # View actions
@@ -1289,14 +2133,18 @@ class MainWindow(QMainWindow):
 
     def _on_delete_selected(self) -> None:
         """Delete all selected items (footprints, wires, junctions)."""
+        before_state = self._capture_project_state()
+        changed = False
         # Collect items to delete (iterate copy to avoid mutation)
         for item in list(self._scene.selectedItems()):
             if isinstance(item, FootprintItem):
-                self._on_delete_component(item.uid)
+                changed = self._remove_footprint_by_uid(item.uid) or changed
             elif isinstance(item, WireSegmentItem):
-                self._ctx_delete_wire(item)
+                changed = self._remove_wire(item) or changed
             elif isinstance(item, JunctionItem):
-                self._ctx_delete_junction(item)
+                changed = self._remove_junction(item) or changed
+        if changed:
+            self._push_history_state("Delete selection", before_state)
 
     def _on_about(self) -> None:
         QMessageBox.about(
@@ -1312,6 +2160,7 @@ class MainWindow(QMainWindow):
             "<li><b>J</b> – Add junction</li>"
             "<li><b>P</b> – Place footprint</li>"
             "<li><b>Del</b> – Delete selected</li>"
+            "<li><b>Ctrl+Z / Ctrl+Y</b> – Undo / Redo</li>"
             "<li><b>Esc</b> – Cancel / deselect</li>"
             "<li><b>Ctrl+E</b> – Export KiCad project</li>"
             "</ul>")
@@ -1337,18 +2186,55 @@ class MainWindow(QMainWindow):
             self._status.showMessage(
                 "No KiCad libraries found. Use 'Library Paths' to configure.")
 
-    # ------------------------------------------------------------------
-    # File slots
-    # ------------------------------------------------------------------
+    def _capture_project_state(self) -> dict[str, Any]:
+        return {
+            "settings": {
+                "pixels_per_mm": self._coord.pixels_per_mm,
+                "origin_offset_mm": list(self._coord.origin_offset_mm),
+                "net_counter": self._net_counter,
+            },
+            "images": {
+                "top": self._image_engine.top().source_path,
+                "bottom": self._image_engine.bottom().source_path,
+                "top_visible": self._props.chk_top.isChecked(),
+                "bottom_visible": self._props.chk_bot.isChecked(),
+                "bottom_opacity": self._props.opacity_slider.value(),
+                "bottom_mirrored": self._props.chk_mirror.isChecked(),
+            },
+            "components": [fp.to_dict() for fp in self._footprints],
+            "wires": [w.to_dict() for w in self._wires],
+            "junctions": [j.to_dict() for j in self._junctions],
+        }
 
-    def _on_new(self) -> None:
-        if self._footprints or self._wires:
-            reply = QMessageBox.question(
-                self, "New Project",
-                "Discard current work?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+    def _push_history_state(self, text: str, before_state: dict[str, Any]) -> None:
+        if self._history_restoring:
+            return
+        after_state = self._capture_project_state()
+        if before_state == after_state:
+            return
+        self._undo_stack.push(_ProjectSnapshotCommand(self, text, before_state, after_state))
+
+    @staticmethod
+    def _replace_component_state(state: dict[str, Any], component: dict[str, Any]) -> bool:
+        uid = component.get("uid")
+        for i, comp in enumerate(state.get("components", [])):
+            if comp.get("uid") == uid:
+                state["components"][i] = deepcopy(component)
+                return True
+        return False
+
+    def _clear_pending_pad(self) -> None:
+        if not self._pending_pad:
+            return
+        src_uid, src_pad = self._pending_pad
+        src_fp = next((f for f in self._footprints if f.uid == src_uid), None)
+        if src_fp:
+            src_fp.highlight_pad(src_pad, False)
+        self._pending_pad = None
+
+    def _clear_project_scene(self) -> None:
+        self._cancel_wire_draw()
+        self._clear_pending_pad()
         for fp in self._footprints:
             self._scene.removeItem(fp)
         self._footprints.clear()
@@ -1361,9 +2247,110 @@ class MainWindow(QMainWindow):
         for line in self._ratsnest_lines:
             self._scene.removeItem(line)
         self._ratsnest_lines.clear()
+        self._image_engine.clear()
         self._comp_list.refresh(self._footprints)
         self._props.set_component(None)
+
+    def _sync_footprint_visibility(self, fp: FootprintItem) -> None:
+        if fp.layer in self._layer_checks:
+            fp.setVisible(self._layer_checks[fp.layer].isChecked())
+
+    def _sync_wire_visibility(self, item: QGraphicsItem) -> None:
+        item.setVisible(self._layer_checks["Wires"].isChecked())
+
+    def _attach_footprint_signals(self, item: FootprintItem) -> None:
+        item.signals.pad_clicked.connect(self._on_pad_clicked)
+        item.signals.pad_right_clicked.connect(self._on_pad_right_clicked)
+        item.signals.position_changed.connect(lambda *_: self._rebuild_ratsnest())
+        item.signals.move_finished.connect(self._on_footprint_move_finished)
+        item.connect_mode = self._connect_mode
+
+    def _create_footprint_from_data(self, cd: dict[str, Any]) -> FootprintItem:
+        fp_name = f"{cd['footprint_lib']}:{cd['footprint_name']}"
+        fp_data = self._library.parse_footprint(fp_name)
+        item = FootprintItem(
+            footprint_data=fp_data,
+            uid=cd.get("uid", ""),
+            footprint_lib=cd["footprint_lib"],
+            footprint_name=cd["footprint_name"],
+            reference=cd.get("reference", "REF**"),
+            value=cd.get("value", "VAL**"),
+            symbol_lib=cd.get("symbol_lib", ""),
+            symbol_name=cd.get("symbol_name", ""),
+            pixels_per_mm=self._coord.pixels_per_mm,
+        )
+        item.layer = cd.get("layer", "F.Cu")
+        item.set_rotation(cd.get("rotation", 0))
+        item.setPos(cd.get("x_px", 0), cd.get("y_px", 0))
+        for pad_num, net_name in cd.get("pad_nets", {}).items():
+            item.set_pad_net(pad_num, net_name)
+        item.pin_map = dict(cd.get("pin_map", {}))
+        self._attach_footprint_signals(item)
+        self._scene.addItem(item)
+        self._footprints.append(item)
+        self._sync_footprint_visibility(item)
+        return item
+
+    def _restore_project_state(self, state: dict[str, Any]) -> None:
+        self._history_restoring = True
+        try:
+            self._clear_project_scene()
+
+            settings = state.get("settings", {})
+            self._coord.pixels_per_mm = settings.get("pixels_per_mm", 10.0)
+            off = settings.get("origin_offset_mm", [0, 0])
+            self._coord.origin_offset_mm = (off[0], off[1])
+            self._net_counter = settings.get("net_counter", 0)
+
+            images = state.get("images", {})
+            top_path = images.get("top", "")
+            bottom_path = images.get("bottom", "")
+            if top_path:
+                self._image_engine.load_top(top_path)
+            if bottom_path:
+                self._image_engine.load_bottom(bottom_path)
+            self._props.chk_top.setChecked(images.get("top_visible", True))
+            self._props.chk_bot.setChecked(images.get("bottom_visible", True))
+            self._props.opacity_slider.setValue(images.get("bottom_opacity", 50))
+            self._props.chk_mirror.setChecked(images.get("bottom_mirrored", False))
+
+            for cd in state.get("components", []):
+                self._create_footprint_from_data(cd)
+
+            for wd in state.get("wires", []):
+                wire = WireSegmentItem.from_dict(wd)
+                self._scene.addItem(wire)
+                self._wires.append(wire)
+                self._sync_wire_visibility(wire)
+
+            for jd in state.get("junctions", []):
+                junc = JunctionItem.from_dict(jd)
+                self._scene.addItem(junc)
+                self._junctions.append(junc)
+                self._sync_wire_visibility(junc)
+
+            self._comp_list.refresh(self._footprints)
+            self._props.set_component(None)
+            self._rebuild_ratsnest()
+        finally:
+            self._history_restoring = False
+
+    # ------------------------------------------------------------------
+    # File slots
+    # ------------------------------------------------------------------
+
+    def _on_new(self) -> None:
+        if self._footprints or self._wires or self._junctions:
+            reply = QMessageBox.question(
+                self, "New Project",
+                "Discard current work?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        self._clear_project_scene()
+        self._net_counter = 0
         self._project_path = None
+        self._undo_stack.clear()
         self._status.showMessage("New project created.")
 
     def _on_open_project(self) -> None:
@@ -1377,26 +2364,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Open Error", str(exc))
             return
 
-        # Clear current
-        for fp in self._footprints:
-            self._scene.removeItem(fp)
-        self._footprints.clear()
-        for w in self._wires:
-            self._scene.removeItem(w)
-        self._wires.clear()
-        for j in self._junctions:
-            self._scene.removeItem(j)
-        self._junctions.clear()
-        for line in self._ratsnest_lines:
-            self._scene.removeItem(line)
-        self._ratsnest_lines.clear()
-
-        # Apply settings
-        settings = data.get("settings", {})
-        self._coord.pixels_per_mm = settings.get("pixels_per_mm", 10.0)
-        off = settings.get("origin_offset_mm", [0, 0])
-        self._coord.origin_offset_mm = (off[0], off[1])
-
         # DEBUG: při ladění nenačítáme cesty z projektu ani nepřeskenováváme
         # knihovny – používáme pouze uživatelské knihovny načtené při startu.
         # fp_paths = settings.get("footprint_paths", [])
@@ -1408,54 +2375,10 @@ class MainWindow(QMainWindow):
         # self._library.scan()
         # self._lib_browser.populate()
 
-        # Load images
-        images = data.get("images", {})
-        if images.get("top"):
-            self._image_engine.load_top(images["top"])
-        if images.get("bottom"):
-            self._image_engine.load_bottom(images["bottom"])
-
-        # Recreate components
-        for cd in data.get("components", []):
-            fp_name = f"{cd['footprint_lib']}:{cd['footprint_name']}"
-            fp_data = self._library.parse_footprint(fp_name)
-            item = FootprintItem(
-                footprint_data=fp_data,
-                footprint_lib=cd["footprint_lib"],
-                footprint_name=cd["footprint_name"],
-                reference=cd.get("reference", "REF**"),
-                value=cd.get("value", "VAL**"),
-                symbol_lib=cd.get("symbol_lib", ""),
-                symbol_name=cd.get("symbol_name", ""),
-                pixels_per_mm=self._coord.pixels_per_mm,
-            )
-            item.layer = cd.get("layer", "F.Cu")
-            item.set_rotation(cd.get("rotation", 0))
-            item.setPos(cd.get("x_px", 0), cd.get("y_px", 0))
-            for pad_num, net_name in cd.get("pad_nets", {}).items():
-                item.set_pad_net(pad_num, net_name)
-            item.signals.pad_clicked.connect(self._on_pad_clicked)
-            item.signals.pad_right_clicked.connect(self._on_pad_right_clicked)
-            item.signals.position_changed.connect(lambda *_: self._rebuild_ratsnest())
-            self._scene.addItem(item)
-            self._footprints.append(item)
-
-        self._comp_list.refresh(self._footprints)
-        self._rebuild_ratsnest()
-
-        # Recreate wires
-        for wd in data.get("wires", []):
-            wire = WireSegmentItem.from_dict(wd)
-            self._scene.addItem(wire)
-            self._wires.append(wire)
-
-        # Recreate junctions
-        for jd in data.get("junctions", []):
-            junc = JunctionItem.from_dict(jd)
-            self._scene.addItem(junc)
-            self._junctions.append(junc)
+        self._restore_project_state(data)
 
         self._project_path = path
+        self._undo_stack.clear()
         self._status.showMessage(f"Opened: {path}")
 
     def _on_save_project(self) -> None:
@@ -1505,10 +2428,12 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Top Photo", "", self._image_filter())
         if path:
+            before_state = self._capture_project_state()
             if self._image_engine.load_top(path):
                 self._status.showMessage(f"Top layer: {Path(path).name}")
                 self._view.fitInView(
                     self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+                self._push_history_state("Load top photo", before_state)
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load: {path}")
 
@@ -1516,8 +2441,10 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Bottom Photo", "", self._image_filter())
         if path:
+            before_state = self._capture_project_state()
             if self._image_engine.load_bottom(path):
                 self._status.showMessage(f"Bottom layer: {Path(path).name}")
+                self._push_history_state("Load bottom photo", before_state)
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load: {path}")
 
@@ -1527,6 +2454,7 @@ class MainWindow(QMainWindow):
 
     def _on_add_footprint(self, full_name: str) -> None:
         """Place a real footprint on the canvas at the viewport centre."""
+        before_state = self._capture_project_state()
         fp_data = self._library.parse_footprint(full_name)
         info = self._library.get_footprint(full_name)
         if not info:
@@ -1549,15 +2477,14 @@ class MainWindow(QMainWindow):
             pixels_per_mm=self._coord.pixels_per_mm,
         )
         item.setPos(centre)
-        item.signals.pad_clicked.connect(self._on_pad_clicked)
-        item.signals.pad_right_clicked.connect(self._on_pad_right_clicked)
-        item.signals.position_changed.connect(lambda *_: self._rebuild_ratsnest())
-        item.connect_mode = self._connect_mode
+        self._attach_footprint_signals(item)
         self._scene.addItem(item)
         self._footprints.append(item)
+        self._sync_footprint_visibility(item)
         self._comp_list.refresh(self._footprints)
         self._props.set_component(item)
         self._status.showMessage(f"Placed {item.reference} ({info.full_name})")
+        self._push_history_state("Place footprint", before_state)
 
     def _on_place_from_browser(self) -> None:
         """Toolbar action: place whatever is selected in the footprint browser."""
@@ -1595,6 +2522,7 @@ class MainWindow(QMainWindow):
         if not fp:
             self._status.showMessage("Select a component first.")
             return
+        before_state = self._capture_project_state()
         dlg = SymbolBrowserDialog(self._library, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             sym_name = dlg.selected_symbol()
@@ -1602,10 +2530,15 @@ class MainWindow(QMainWindow):
                 parts = sym_name.split(":", 1)
                 fp.symbol_lib = parts[0]
                 fp.symbol_name = parts[1] if len(parts) > 1 else parts[0]
+                # Reset pin_map when symbol changes
+                fp.pin_map = {}
                 self._props.set_component(fp)
                 self._comp_list.refresh(self._footprints)
                 self._status.showMessage(
                     f"Linked {fp.reference} → {sym_name}")
+                self._push_history_state("Link symbol", before_state)
+                # Auto-open pin mapping dialog so user can assign pads
+                self._on_pin_pad_mapping()
 
     # ------------------------------------------------------------------
     # Component selection / deletion
@@ -1620,17 +2553,23 @@ class MainWindow(QMainWindow):
                 return
 
     def _on_delete_component(self, uid: str) -> None:
-        for i, fp in enumerate(self._footprints):
-            if fp.uid == uid:
-                self._scene.removeItem(fp)
-                self._footprints.pop(i)
-                self._comp_list.refresh(self._footprints)
-                self._props.set_component(None)
-                self._status.showMessage(f"Removed {fp.reference}")
-                return
+        before_state = self._capture_project_state()
+        if self._remove_footprint_by_uid(uid):
+            self._push_history_state("Delete component", before_state)
 
-    def _on_property_changed(self) -> None:
+    def _on_property_changed(self, before_component: dict[str, Any], after_component: dict[str, Any]) -> None:
         self._comp_list.refresh(self._footprints)
+        self._rebuild_ratsnest()
+        after_state = self._capture_project_state()
+        before_state = deepcopy(after_state)
+        if self._replace_component_state(before_state, before_component):
+            label = before_component.get("reference") or after_component.get("reference") or "component"
+            self._undo_stack.push(_ProjectSnapshotCommand(
+                self,
+                f"Edit {label}",
+                before_state,
+                after_state,
+            ))
 
     def _on_scene_selection_changed(self) -> None:
         selected = [fp for fp in self._footprints if fp.isSelected()]
@@ -1644,6 +2583,52 @@ class MainWindow(QMainWindow):
             if fp.isSelected():
                 return fp
         return self._props._current
+
+    def _remove_footprint_by_uid(self, uid: str) -> bool:
+        for i, fp in enumerate(self._footprints):
+            if fp.uid == uid:
+                self._scene.removeItem(fp)
+                self._footprints.pop(i)
+                self._comp_list.refresh(self._footprints)
+                if self._props._current is fp:
+                    self._props.set_component(None)
+                self._rebuild_ratsnest()
+                self._status.showMessage(f"Removed {fp.reference}")
+                return True
+        return False
+
+    def _remove_wire(self, wire: WireSegmentItem) -> bool:
+        if wire in self._wires:
+            self._wires.remove(wire)
+            self._scene.removeItem(wire)
+            return True
+        return False
+
+    def _remove_junction(self, junc: JunctionItem) -> bool:
+        if junc in self._junctions:
+            self._junctions.remove(junc)
+            self._scene.removeItem(junc)
+            return True
+        return False
+
+    def _on_footprint_move_finished(self, uid: str,
+                                    old_x: float, old_y: float,
+                                    _new_x: float, _new_y: float) -> None:
+        if self._history_restoring:
+            return
+        after_state = self._capture_project_state()
+        before_state = deepcopy(after_state)
+        for comp in before_state.get("components", []):
+            if comp.get("uid") == uid:
+                comp["x_px"] = old_x
+                comp["y_px"] = old_y
+                self._undo_stack.push(_ProjectSnapshotCommand(
+                    self,
+                    f"Move {comp.get('reference', 'component')}",
+                    before_state,
+                    after_state,
+                ))
+                return
 
     # ------------------------------------------------------------------
     # Connect Nets mode
@@ -1696,6 +2681,7 @@ class MainWindow(QMainWindow):
                 return
 
             # Determine net name: prefer existing net, else auto-generate
+            before_state = self._capture_project_state()
             src_net = src_fp.pad_nets.get(src_pad, "") if src_fp else ""
             dst_net = fp.pad_nets.get(pad_number, "")
             if src_net:
@@ -1713,6 +2699,7 @@ class MainWindow(QMainWindow):
             src_ref = src_fp.reference if src_fp else "?"
             self._status.showMessage(
                 f"Connected {src_ref}[{src_pad}] ↔ {fp.reference}[{pad_number}]  net: '{net}'")
+            self._push_history_state("Connect pads", before_state)
 
     def _on_pad_right_clicked(self, fp_uid: str, pad_number: str) -> None:
         """Right-click: manually enter/clear net name for a single pad."""
@@ -1720,6 +2707,7 @@ class MainWindow(QMainWindow):
         if not fp:
             return
         current_net = fp.pad_nets.get(pad_number, "")
+        before_state = self._capture_project_state()
         net_name, ok = QInputDialog.getText(
             self,
             f"Set Net — {fp.reference} pad {pad_number}",
@@ -1733,6 +2721,7 @@ class MainWindow(QMainWindow):
                 f"{fp.reference}[{pad_number}] → '{net_name.strip()}'"
                 if net_name.strip() else
                 f"{fp.reference}[{pad_number}] net cleared")
+            self._push_history_state("Edit pad net", before_state)
 
     def _rebuild_ratsnest(self) -> None:
         """Redraw ratsnest lines connecting pads that share the same net."""

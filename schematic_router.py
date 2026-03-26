@@ -62,12 +62,11 @@ def grid_to_mm(value: int) -> float:
 def compute_sch_rotation(comp: ComponentPlacement) -> float:
     """Compute the schematic rotation (degrees) for a component.
 
-    Mirrors the logic in ``KicadSchWriter.generate()``:
-        original_rot = (360 - comp.rotation) % 360
-        rot = (round(original_rot / 90) * 90 + 90) % 360
+    Must match the logic in ``KicadSchWriter.generate()``:
+        rot = (round(((360 - canvas_rot) % 360) / 90) * 90) % 360
     """
     original_rot = (360 - comp.rotation) % 360
-    return (round(original_rot / 90.0) * 90 + 90) % 360
+    return (round(original_rot / 90.0) * 90) % 360
 
 
 def extract_pins_from_sexpr(sexpr_text: str) -> dict[str, tuple[float, float]]:
@@ -323,7 +322,12 @@ class SchematicRouter:
 
     @staticmethod
     def _build_pin_map(components: list[ComponentPlacement]) -> list[PinInfo]:
-        """Compute all pin positions in schematic space."""
+        """Compute all pin positions in schematic space.
+
+        Uses ``comp.pin_map`` (pin_number → pad_number) so that the
+        lookup key ``(reference, pad_number)`` matches WirePlacement
+        fields ``start_pad`` / ``end_pad`` which carry **pad** numbers.
+        """
         pins: list[PinInfo] = []
         for comp in components:
             sch_rot = compute_sch_rotation(comp)
@@ -335,10 +339,14 @@ class SchematicRouter:
             if not local_pins:
                 local_pins = {"1": (-5.08, 0.0), "2": (5.08, 0.0)}
 
+            # pin_map: symbol_pin_number → footprint_pad_number
+            pin_to_pad: dict[str, str] = dict(comp.pin_map) if comp.pin_map else {}
+
             rad = math.radians(sch_rot)
             cos_r, sin_r = math.cos(rad), math.sin(rad)
 
-            for pad_num, (px, py) in local_pins.items():
+            for pin_num, (px, py) in local_pins.items():
+                pad_num = pin_to_pad.get(pin_num, pin_num)
                 py_flip = -py  # symbol Y-up → schematic Y-down
                 rpx = px * cos_r - py_flip * sin_r
                 rpy = px * sin_r + py_flip * cos_r

@@ -2,202 +2,10 @@
   (version 20250114)
   (generator "pcb_to_kicad")
   (generator_version "9.0")
-  (uuid "31c6a200-7191-484f-a04c-9747fd93228c")
+  (uuid "2a203dc7-28c5-49c7-b723-77bf05372e5c")
   (paper "A4")
   (lib_symbols
-    				(symbol 00_basic:C_Polarized
-					(pin_numbers
-						(hide yes)
-					)
-					(pin_names
-						(offset 0.254)
-						(hide yes)
-					)
-					(exclude_from_sim no)
-					(in_bom yes)
-					(on_board yes)
-					(property Reference C
-						(at 0.635 2.54 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-							(justify left)
-						)
-					)
-					(property Value C_Polarized
-						(at 0.635 -2.54 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-							(justify left)
-						)
-					)
-					(property Footprint ~
-						(at 0 -20.32 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-							(hide yes)
-						)
-					)
-					(property Datasheet https://cdn.sparkfun.com/assets/8/a/4/a/5/Kemet_Capacitor_Datasheet.pdf
-						(at 1.27 -15.24 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-							(hide yes)
-						)
-					)
-					(property Description "Polarized capacitor, US symbol"
-						(at 0 -17.78 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-							(hide yes)
-						)
-					)
-					(property PROD_ID CAP-00000
-						(at 0 -12.7 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-							(hide yes)
-						)
-					)
-					(property Voltage 1kV
-						(at 0 -7.62 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(property Tolerance 100%
-						(at 0 -10.16 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(property ki_keywords "SparkFun cap capacitor"
-						(at 0 0 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-							(hide yes)
-						)
-					)
-					(property ki_fp_filters CP_*
-						(at 0 0 0)
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-							(hide yes)
-						)
-					)
-					(symbol C_Polarized_0_1
-						(polyline
-							(pts
-								(xy -2.032 0.762)
-								(xy 2.032 0.762)
-							)
-							(stroke
-								(width 0.508)
-								(type default)
-							)
-							(fill
-								(type none)
-							)
-						)
-						(polyline
-							(pts
-								(xy -1.778 2.286)
-								(xy -0.762 2.286)
-							)
-							(stroke
-								(width 0)
-								(type default)
-							)
-							(fill
-								(type none)
-							)
-						)
-						(polyline
-							(pts
-								(xy -1.27 1.778)
-								(xy -1.27 2.794)
-							)
-							(stroke
-								(width 0)
-								(type default)
-							)
-							(fill
-								(type none)
-							)
-						)
-						(arc
-							(start -2.032 -1.27)
-							(mid 0 -0.5572)
-							(end 2.032 -1.27)
-							(stroke
-								(width 0.508)
-								(type default)
-							)
-							(fill
-								(type none)
-							)
-						)
-					)
-					(symbol C_Polarized_1_1
-						(pin passive line
-							(at 0 3.81 270)
-							(length 2.794)
-							(name ~
-								(effects
-									(font
-										(size 1.27 1.27)
-									)
-								)
-							)
-							(number "1"
-								(effects
-									(font
-										(size 1.27 1.27)
-									)
-								)
-							)
-						)
-						(pin passive line
-							(at 0 -3.81 90)
-							(length 3.302)
-							(name ~
-								(effects
-									(font
-										(size 1.27 1.27)
-									)
-								)
-							)
-							(number "2"
-								(effects
-									(font
-										(size 1.27 1.27)
-									)
-								)
-							)
-						)
-					)
-					(embedded_fonts no)
-				)
-    				(symbol 00_basic:R
+    				(symbol RE_passive:R
 					(pin_numbers
 						(hide yes)
 					)
@@ -321,27 +129,569 @@
 					)
 					(embedded_fonts no)
 				)
-    (symbol "_placeholder:U3"
+    				(symbol RE_active:Q_NPN
+					(pin_numbers
+						(hide yes)
+					)
+					(pin_names
+						(offset 0)
+						(hide yes)
+					)
+					(exclude_from_sim no)
+					(in_bom yes)
+					(on_board yes)
+					(property Reference Q
+						(at 5.08 1.27 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Value Q_NPN
+						(at 5.08 -1.27 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Footprint ""
+						(at 5.08 2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Datasheet ~
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Description "NPN bipolar junction transistor"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_keywords BJT
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(symbol Q_NPN_0_1
+						(polyline
+							(pts
+								(xy -2.54 0)
+								(xy 0.635 0)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 0.635 1.905)
+								(xy 0.635 -1.905)
+							)
+							(stroke
+								(width 0.508)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 0.635 0.635)
+								(xy 2.54 2.54)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 0.635 -0.635)
+								(xy 2.54 -2.54)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(circle
+							(center 1.27 0)
+							(radius 2.8194)
+							(stroke
+								(width 0.254)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 1.27 -1.778)
+								(xy 1.778 -1.27)
+								(xy 2.286 -2.286)
+								(xy 1.27 -1.778)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type outline)
+							)
+						)
+					)
+					(symbol Q_NPN_1_1
+						(pin input line
+							(at -5.08 0 0)
+							(length 2.54)
+							(name B
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number B
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 2.54 5.08 270)
+							(length 2.54)
+							(name C
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number C
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 2.54 -5.08 90)
+							(length 2.54)
+							(name E
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number E
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+					)
+					(embedded_fonts no)
+				)
+    				(symbol RE_active:Q_NMOS
+					(pin_numbers
+						(hide yes)
+					)
+					(pin_names
+						(offset 0)
+						(hide yes)
+					)
+					(exclude_from_sim no)
+					(in_bom yes)
+					(on_board yes)
+					(property Reference Q
+						(at 5.08 1.27 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Value Q_NMOS
+						(at 5.08 -1.27 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(justify left)
+						)
+					)
+					(property Footprint ""
+						(at 5.08 2.54 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Datasheet ~
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property Description "N-MOSFET transistor"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(property ki_keywords "NMOS N-MOS"
+						(at 0 0 0)
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+							(hide yes)
+						)
+					)
+					(symbol Q_NMOS_0_1
+						(polyline
+							(pts
+								(xy 0.254 1.905)
+								(xy 0.254 -1.905)
+							)
+							(stroke
+								(width 0.254)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 0.254 0)
+								(xy -2.54 0)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 0.762 2.286)
+								(xy 0.762 1.27)
+							)
+							(stroke
+								(width 0.254)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 0.762 0.508)
+								(xy 0.762 -0.508)
+							)
+							(stroke
+								(width 0.254)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 0.762 -1.27)
+								(xy 0.762 -2.286)
+							)
+							(stroke
+								(width 0.254)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 0.762 -1.778)
+								(xy 3.302 -1.778)
+								(xy 3.302 1.778)
+								(xy 0.762 1.778)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 1.016 0)
+								(xy 2.032 0.381)
+								(xy 2.032 -0.381)
+								(xy 1.016 0)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type outline)
+							)
+						)
+						(circle
+							(center 1.651 0)
+							(radius 2.794)
+							(stroke
+								(width 0.254)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 2.54 2.54)
+								(xy 2.54 1.778)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(circle
+							(center 2.54 1.778)
+							(radius 0.254)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type outline)
+							)
+						)
+						(circle
+							(center 2.54 -1.778)
+							(radius 0.254)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type outline)
+							)
+						)
+						(polyline
+							(pts
+								(xy 2.54 -2.54)
+								(xy 2.54 0)
+								(xy 0.762 0)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 2.921 0.381)
+								(xy 3.683 0.381)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+						(polyline
+							(pts
+								(xy 3.302 0.381)
+								(xy 2.921 -0.254)
+								(xy 3.683 -0.254)
+								(xy 3.302 0.381)
+							)
+							(stroke
+								(width 0)
+								(type default)
+							)
+							(fill
+								(type none)
+							)
+						)
+					)
+					(symbol Q_NMOS_1_1
+						(pin input line
+							(at -5.08 0 0)
+							(length 2.54)
+							(name G
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number G
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 2.54 5.08 270)
+							(length 2.54)
+							(name D
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number D
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+						(pin passive line
+							(at 2.54 -5.08 90)
+							(length 2.54)
+							(name S
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+							(number S
+								(effects
+									(font
+										(size 1.27 1.27)
+									)
+								)
+							)
+						)
+					)
+					(embedded_fonts no)
+				)
+    (symbol "_placeholder:U5"
       (pin_names (offset 1.016))
       (exclude_from_sim no)
       (in_bom yes)
       (on_board yes)
-      (property "Reference" "U3" (at 0 2.54 0)
+      (property "Reference" "U5" (at 0 2.54 0)
         (effects (font (size 1.27 1.27)))
       )
       (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 0 -2.54 0)
         (effects (font (size 1.27 1.27)))
       )
-      (property "Footprint" "00_basic:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 0 -5.08 0)
+      (property "Footprint" "RE_passive_tht:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 0 -5.08 0)
         (effects (font (size 1.27 1.27)) hide)
       )
-      (symbol "U3_0_1"
+      (symbol "U5_0_1"
         (rectangle (start -2.54 1.27) (end 2.54 -1.27)
           (stroke (width 0.254) (type default))
           (fill (type background))
         )
       )
-      (symbol "U3_1_1"
+      (symbol "U5_1_1"
+        (pin passive line (at -5.08 0 0) (length 2.54)
+          (name "1" (effects (font (size 1.27 1.27))))
+          (number "1" (effects (font (size 1.27 1.27))))
+        )
+        (pin passive line (at 5.08 0 180) (length 2.54)
+          (name "2" (effects (font (size 1.27 1.27))))
+          (number "2" (effects (font (size 1.27 1.27))))
+        )
+      )
+    )
+    (symbol "_placeholder:U6"
+      (pin_names (offset 1.016))
+      (exclude_from_sim no)
+      (in_bom yes)
+      (on_board yes)
+      (property "Reference" "U6" (at 0 2.54 0)
+        (effects (font (size 1.27 1.27)))
+      )
+      (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 0 -2.54 0)
+        (effects (font (size 1.27 1.27)))
+      )
+      (property "Footprint" "RE_passive_tht:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 0 -5.08 0)
+        (effects (font (size 1.27 1.27)) hide)
+      )
+      (symbol "U6_0_1"
+        (rectangle (start -2.54 1.27) (end 2.54 -1.27)
+          (stroke (width 0.254) (type default))
+          (fill (type background))
+        )
+      )
+      (symbol "U6_1_1"
         (pin passive line (at -5.08 0 0) (length 2.54)
           (name "1" (effects (font (size 1.27 1.27))))
           (number "1" (effects (font (size 1.27 1.27))))
@@ -354,21 +704,21 @@
     )
   )
   (symbol
-    (lib_id "00_basic:C_Polarized")
-    (at 135.89 88.90 90)
+    (lib_id "RE_passive:R")
+    (at 137.16 109.22 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "2dd11a4e-9107-495f-b98b-d0c49d787953")
-    (property "Reference" "U1" (at 135.89 85.90 0)
+    (uuid "4079e939-5160-4203-a7da-21e8462d7893")
+    (property "Reference" "U1" (at 137.16 106.22 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "CP_Radial_D25.0mm_P10.00mm_SnapIn" (at 135.89 91.90 0)
+    (property "Value" "R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" (at 137.16 112.22 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "00_basic:CP_Radial_D25.0mm_P10.00mm_SnapIn" (at 135.89 93.90 0)
+    (property "Footprint" "00_basic:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" (at 137.16 114.22 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
@@ -381,21 +731,21 @@
     )
   )
   (symbol
-    (lib_id "00_basic:R")
-    (at 132.08 121.92 90)
+    (lib_id "RE_active:Q_NPN")
+    (at 147.32 102.87 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "7945d3fe-342a-4c6c-8c5b-a4d688428364")
-    (property "Reference" "U2" (at 132.08 118.92 0)
+    (uuid "aa990457-a9d7-4495-a871-19137f2757de")
+    (property "Reference" "U2" (at 147.32 99.87 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal" (at 132.08 124.92 0)
+    (property "Value" "SOT-23" (at 147.32 105.87 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "00_basic:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal" (at 132.08 126.92 0)
+    (property "Footprint" "RE_active:SOT-23" (at 147.32 107.87 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
@@ -408,21 +758,21 @@
     )
   )
   (symbol
-    (lib_id "_placeholder:U3")
-    (at 165.10 101.60 180)
+    (lib_id "RE_active:Q_NMOS")
+    (at 163.83 116.84 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
-    (uuid "15044779-f229-4002-849c-b1f7f7501764")
-    (property "Reference" "U3" (at 165.10 98.60 0)
+    (uuid "9e64115d-f923-47da-b626-6bd997a4081d")
+    (property "Reference" "U3" (at 163.83 113.84 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 165.10 104.60 0)
+    (property "Value" "TO-220-3_Horizontal_TabDown" (at 163.83 119.84 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Footprint" "00_basic:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 165.10 106.60 0)
+    (property "Footprint" "RE_active:TO-220-3_Horizontal_TabDown" (at 163.83 121.84 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (instances
@@ -434,40 +784,113 @@
       )
     )
   )
-  (wire (pts (xy 139.70 88.90) (xy 140.97 88.90))
-    (stroke (width 0) (type default))
-    (uuid "b457d540-faeb-41d3-b098-897b6add97f5")
+  (symbol
+    (lib_id "RE_active:Q_NPN")
+    (at 147.32 91.44 0)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "614c7e2d-9297-43bf-aff0-97e5166c61b9")
+    (property "Reference" "U4" (at 147.32 88.44 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "TO-92_Wide" (at 147.32 94.44 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "RE_active:TO-92_Wide" (at 147.32 96.44 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U4")
+          (unit 1)
+        )
+      )
+    )
   )
-  (wire (pts (xy 140.97 88.90) (xy 140.97 121.92))
-    (stroke (width 0) (type default))
-    (uuid "6c04d1d7-e9ae-44bb-b023-730e44665d9c")
+  (symbol
+    (lib_id "_placeholder:U5")
+    (at 133.35 121.92 0)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "76d01d8a-d989-49f9-8164-d52fb180dae8")
+    (property "Reference" "U5" (at 133.35 118.92 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 133.35 124.92 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "RE_passive_tht:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 133.35 126.92 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U5")
+          (unit 1)
+        )
+      )
+    )
   )
-  (wire (pts (xy 140.97 121.92) (xy 135.89 121.92))
-    (stroke (width 0) (type default))
-    (uuid "13b660c7-4df0-44e0-8ad4-e227ef42d357")
+  (symbol
+    (lib_id "_placeholder:U6")
+    (at 157.48 106.68 0)
+    (unit 1)
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (dnp no)
+    (uuid "694518e3-8f44-4e83-8178-936a881c9feb")
+    (property "Reference" "U6" (at 157.48 103.68 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Value" "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 157.48 109.68 0)
+      (effects (font (size 1.27 1.27)))
+    )
+    (property "Footprint" "RE_passive_tht:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal" (at 157.48 111.68 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (instances
+      (project ""
+        (path "/"
+          (reference "U6")
+          (unit 1)
+        )
+      )
+    )
   )
-  (wire (pts (xy 132.08 88.90) (xy 127.00 88.90))
+  (wire (pts (xy 138.43 121.92) (xy 140.97 121.92))
     (stroke (width 0) (type default))
-    (uuid "c77a512b-4b78-48a2-a8b1-c8fa408f6137")
+    (uuid "ff286131-9fe1-49ee-82c1-0f5debfeed82")
   )
-  (wire (pts (xy 127.00 88.90) (xy 127.00 121.92))
+  (wire (pts (xy 140.97 121.92) (xy 140.97 104.14))
     (stroke (width 0) (type default))
-    (uuid "5dac1ab1-147f-4d62-b75e-5b75e63c865a")
+    (uuid "fa5b44fd-5be4-419e-8cf5-b9a26215c956")
   )
-  (wire (pts (xy 127.00 121.92) (xy 128.27 121.92))
+  (wire (pts (xy 140.97 104.14) (xy 137.16 104.14))
     (stroke (width 0) (type default))
-    (uuid "dbbbbf3b-8b60-451a-8d23-64a0be3aee13")
+    (uuid "e2366fd7-a891-4f34-ac2e-d7b45a021aef")
   )
-  (wire (pts (xy 132.08 88.90) (xy 132.08 83.82))
+  (wire (pts (xy 137.16 104.14) (xy 137.16 105.41))
     (stroke (width 0) (type default))
-    (uuid "4bce4a1e-4a24-4ae0-86a6-ff08f9da96ea")
+    (uuid "444c2b74-226f-4b04-b8cc-3861ec8e733e")
   )
-  (wire (pts (xy 132.08 83.82) (xy 170.18 83.82))
+  (wire (pts (xy 128.27 121.92) (xy 128.27 104.14))
     (stroke (width 0) (type default))
-    (uuid "2a3ca59c-49ce-4547-869b-2fb4ff5155ef")
+    (uuid "23d3c01f-aca0-4e50-801d-b7052592710d")
   )
-  (wire (pts (xy 170.18 83.82) (xy 170.18 101.60))
+  (wire (pts (xy 128.27 104.14) (xy 137.16 104.14))
     (stroke (width 0) (type default))
-    (uuid "992f8dcf-92ed-4a85-98a6-74df42b58f29")
+    (uuid "c228aa10-3d63-4156-86dc-7bdbd9b91d9f")
+  )
+  (wire (pts (xy 137.16 104.14) (xy 137.16 105.41))
+    (stroke (width 0) (type default))
+    (uuid "15637128-80b8-4418-8cb3-c38236f68d5d")
   )
 )

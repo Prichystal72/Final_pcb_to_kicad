@@ -34,6 +34,8 @@ class ComponentPlacement:
     uid: str = field(default_factory=lambda: str(uuid.uuid4()))
     # pad_number -> net_name
     pad_nets: dict[str, str] = field(default_factory=dict)
+    # symbol_pin_number -> footprint_pad_number
+    pin_map: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -74,8 +76,13 @@ class KicadPcbWriter:
         self.board_h = board_h_mm
 
     def generate(self, components: list[ComponentPlacement],
-                 output_path: Path) -> tuple[float, float]:
-        """Generate PCB file. Returns (dx, dy) centering offset applied."""
+                 output_path: Path) -> tuple[float, float, dict[str, float]]:
+        """Generate PCB file. Returns (dx, dy, original_rotations).
+
+        original_rotations maps component uid -> canvas rotation (before
+        negation for KiCad).  The caller must pass this to the schematic
+        writer so it knows the true rotation.
+        """
         lines: list[str] = []
         lines.append('(kicad_pcb\n')
         lines.append('  (version 20241229)\n')
@@ -103,13 +110,22 @@ class KicadPcbWriter:
                 c.x_mm += dx
                 c.y_mm += dy
 
+        # Save original canvas rotations BEFORE negating for PCB
+        original_rotations: dict[str, float] = {}
+        for c in components:
+            original_rotations[c.uid] = c.rotation
+
         # Qt canvas uses clockwise-positive rotation,
-        # KiCad uses counter-clockwise-positive → negate.
+        # KiCad PCB uses counter-clockwise-positive → negate.
         for c in components:
             c.rotation = (360 - c.rotation) % 360
 
         for comp in components:
             self._write_footprint(lines, comp, components)
+
+        # Restore original rotations so other writers see canvas values
+        for c in components:
+            c.rotation = original_rotations.get(c.uid, c.rotation)
 
         lines.append(')\n')
 
@@ -117,7 +133,7 @@ class KicadPcbWriter:
         if not _validate_brackets(text):
             raise ValueError("Generated .kicad_pcb has mismatched brackets")
         output_path.write_text(text, encoding="utf-8")
-        return (dx, dy)
+        return (dx, dy, original_rotations)
 
     def _write_layers(self, lines: list[str]) -> None:
         lines.append('  (layers\n')
@@ -308,11 +324,11 @@ class KicadSchWriter:
 
         for comp in components:
             sx, sy = comp.x_mm, comp.y_mm
-            # comp.rotation was negated for KiCad PCB by the PCB writer
-            # ((360 - R) % 360).  Undo that to recover the original canvas
-            # rotation, then add the schematic +90° offset.
-            original_rot = (360 - comp.rotation) % 360
-            rot = (round(original_rot / 90.0) * 90 + 90) % 360
+            # Use the canvas rotation directly. KiCad schematic rotation:
+            # 0°=default, 90/180/270 counter-clockwise.
+            # Canvas uses clockwise-positive, so negate for schematic.
+            canvas_rot = comp.rotation
+            rot = (round(((360 - canvas_rot) % 360) / 90.0) * 90) % 360
             self._write_symbol_instance(lines, comp, sx, sy, rot)
             # Collect pin connection points for net labels
             self._collect_pin_positions(comp, sx, sy, rot, pin_positions)
@@ -476,13 +492,24 @@ class KicadSchWriter:
             # Placeholder symbol: pin 1 at left (-5.08, 0), pin 2 at right (5.08, 0)
             pins = {"1": (-5.08, 0.0), "2": (5.08, 0.0)}
 
+        # Build reverse map: pad_number -> pin_number
+        pad_to_pin: dict[str, str] = {}
+        if comp.pin_map:
+            for pin_num, pad_num in comp.pin_map.items():
+                pad_to_pin[pad_num] = pin_num
+        # Fallback: identity mapping for pads without explicit mapping
+        for pad_num in comp.pad_nets:
+            if pad_num not in pad_to_pin:
+                pad_to_pin[pad_num] = pad_num
+
         rad = math.radians(rotation)
         cos_r, sin_r = math.cos(rad), math.sin(rad)
         for pad_num, net_name in comp.pad_nets.items():
             if not net_name:
                 continue
-            if pad_num in pins:
-                px, py = pins[pad_num]
+            pin_num = pad_to_pin.get(pad_num, pad_num)
+            if pin_num in pins:
+                px, py = pins[pin_num]
                 # Symbol pin coords use Y-up; schematic uses Y-down → flip py
                 py = -py
                 # Rotate pin offset by symbol rotation
@@ -500,12 +527,16 @@ class KicadSchWriter:
         if not pins:
             pins = {"1": (-5.08, 0.0), "2": (5.08, 0.0)}
 
+        # pin_map: pin_number -> pad_number.  We need: for each pad, the pin pos.
+        pin_to_pad: dict[str, str] = dict(comp.pin_map) if comp.pin_map else {}
+
         rad = math.radians(rotation)
         cos_r, sin_r = math.cos(rad), math.sin(rad)
-        for pad_num, (px, py) in pins.items():
+        for pin_num, (px, py) in pins.items():
             py = -py  # Y-up → Y-down
             rpx = px * cos_r - py * sin_r
             rpy = px * sin_r + py * cos_r
+            pad_num = pin_to_pad.get(pin_num, pin_num)
             lookup[(comp.reference, pad_num)] = (sym_x + rpx, sym_y + rpy)
 
     @staticmethod
@@ -571,7 +602,7 @@ class KicadProjectWriter:
         sch_path = output_dir / f"{project_name}.kicad_sch"
 
         pcb_writer = KicadPcbWriter(board_w, board_h)
-        dx, dy = pcb_writer.generate(components, pcb_path)
+        dx, dy, _orig_rots = pcb_writer.generate(components, pcb_path)
 
         # Apply same centering offset to wires
         centered_wires: list[WirePlacement] = []

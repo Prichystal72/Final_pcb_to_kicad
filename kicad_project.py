@@ -85,6 +85,7 @@ class KiCadProjectManager:
                 symbol_sexpr=sym_sexpr,
                 uid=data.get("uid", ""),
                 pad_nets=data.get("pad_nets", {}),
+                pin_map=data.get("pin_map", {}),
             )
             placements.append(cp)
 
@@ -99,7 +100,7 @@ class KiCadProjectManager:
 
         def _find_pad(x_px: float, y_px: float) -> tuple[str, str]:
             """Return (reference, pad_number) of nearest pad, or ('','')."""
-            best_d = 15.0 * ppm  # 15 mm tolerance in pixels
+            best_d = 3.0 * ppm  # 3 mm tolerance in pixels
             ref, pad = "", ""
             for px, py, r, p in pad_lookup:
                 d = ((px - x_px) ** 2 + (py - y_px) ** 2) ** 0.5

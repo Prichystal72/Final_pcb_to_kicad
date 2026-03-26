@@ -34,6 +34,7 @@ class ImageLayer:
         scene.addItem(self._item)
 
         self._source_pixmap: Optional[QPixmap] = None
+        self._source_path: str = ""
         self._mirrored: bool = False
         self._opacity: float = 1.0
 
@@ -47,8 +48,16 @@ class ImageLayer:
         if pixmap.isNull():
             return False
         self._source_pixmap = pixmap
+        self._source_path = str(path)
         self._apply()
         return True
+
+    def clear(self) -> None:
+        """Unload the layer image and reset its graphics item."""
+        self._source_pixmap = None
+        self._source_path = ""
+        self._item.setPixmap(QPixmap())
+        self._item.setPos(0, 0)
 
     def set_opacity(self, value: float) -> None:
         """Set layer opacity (0.0 – fully transparent … 1.0 – fully opaque)."""
@@ -73,6 +82,18 @@ class ImageLayer:
     @property
     def is_loaded(self) -> bool:
         return self._source_pixmap is not None
+
+    @property
+    def source_path(self) -> str:
+        return self._source_path
+
+    @property
+    def mirrored(self) -> bool:
+        return self._mirrored
+
+    @property
+    def opacity(self) -> float:
+        return self._opacity
 
     @property
     def item(self) -> QGraphicsPixmapItem:
@@ -135,6 +156,11 @@ class ImageEngine:
         if ok:
             self.signals.layer_loaded.emit("BOTTOM")
         return ok
+
+    def clear(self) -> None:
+        """Unload both layers."""
+        for layer in self.layers.values():
+            layer.clear()
 
     # ------------------------------------------------------------------
     # Alignment placeholder

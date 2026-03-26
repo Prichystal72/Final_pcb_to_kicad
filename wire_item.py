@@ -41,10 +41,18 @@ class WireSegmentItem(QGraphicsLineItem):
     _counter: int = 0
 
     def __init__(self, x1: float, y1: float, x2: float, y2: float,
-                 net_name: str = "", parent: QGraphicsItem | None = None) -> None:
+                 net_name: str = "", parent: QGraphicsItem | None = None,
+                 uid: str = "") -> None:
         super().__init__(x1, y1, x2, y2, parent)
-        WireSegmentItem._counter += 1
-        self.uid: str = f"W_{WireSegmentItem._counter}"
+        if uid:
+            self.uid = uid
+            try:
+                WireSegmentItem._counter = max(WireSegmentItem._counter, int(uid.split("_")[1]))
+            except (IndexError, ValueError):
+                pass
+        else:
+            WireSegmentItem._counter += 1
+            self.uid = f"W_{WireSegmentItem._counter}"
         self.net_name: str = net_name
         self.signals = _WireSignals()
 
@@ -80,7 +88,11 @@ class WireSegmentItem(QGraphicsLineItem):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "WireSegmentItem":
-        item = cls(d["x1"], d["y1"], d["x2"], d["y2"], d.get("net_name", ""))
+        item = cls(
+            d["x1"], d["y1"], d["x2"], d["y2"],
+            d.get("net_name", ""),
+            uid=d.get("uid", ""),
+        )
         return item
 
     # ---- helpers ----
@@ -102,11 +114,19 @@ class JunctionItem(QGraphicsEllipseItem):
     _counter: int = 0
 
     def __init__(self, x: float, y: float,
+                 uid: str = "",
                  parent: QGraphicsItem | None = None) -> None:
         r = _JUNCTION_RADIUS
         super().__init__(x - r, y - r, 2 * r, 2 * r, parent)
-        JunctionItem._counter += 1
-        self.uid: str = f"J_{JunctionItem._counter}"
+        if uid:
+            self.uid = uid
+            try:
+                JunctionItem._counter = max(JunctionItem._counter, int(uid.split("_")[1]))
+            except (IndexError, ValueError):
+                pass
+        else:
+            JunctionItem._counter += 1
+            self.uid = f"J_{JunctionItem._counter}"
         self._cx = x
         self._cy = y
 
@@ -134,7 +154,7 @@ class JunctionItem(QGraphicsEllipseItem):
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "JunctionItem":
-        return cls(d["x"], d["y"])
+        return cls(d["x"], d["y"], uid=d.get("uid", ""))
 
 
 def compute_45_route(anchor: QPointF, target: QPointF,

@@ -42,6 +42,7 @@ def _layer_color(layer: str) -> QColor:
 class _Signals(QObject):
     position_changed = Signal(str, float, float)
     selected_changed = Signal(str, bool)
+    move_finished = Signal(str, float, float, float, float)
     # emitted when the user clicks a pad in connect-net mode
     pad_clicked = Signal(str, str)        # fp_uid, pad_number  (left-click)
     pad_right_clicked = Signal(str, str)  # fp_uid, pad_number  (right-click)
@@ -167,6 +168,7 @@ class FootprintItem(QGraphicsItemGroup):
     def __init__(
         self,
         footprint_data: Optional[FootprintData] = None,
+        uid: str = "",
         footprint_lib: str = "",
         footprint_name: str = "",
         reference: str = "REF**",
@@ -178,8 +180,15 @@ class FootprintItem(QGraphicsItemGroup):
     ) -> None:
         super().__init__(parent)
 
-        FootprintItem._counter += 1
-        self.uid: str = f"FP_{FootprintItem._counter}"
+        if uid:
+            self.uid = uid
+            try:
+                FootprintItem._counter = max(FootprintItem._counter, int(uid.split("_")[1]))
+            except (IndexError, ValueError):
+                pass
+        else:
+            FootprintItem._counter += 1
+            self.uid = f"FP_{FootprintItem._counter}"
 
         self.footprint_lib = footprint_lib
         self.footprint_name = footprint_name
@@ -194,12 +203,15 @@ class FootprintItem(QGraphicsItemGroup):
 
         # Net assignments: pad_number -> net_name
         self.pad_nets: dict[str, str] = {}
+        # Pin-to-pad mapping: symbol_pin_number -> footprint_pad_number
+        self.pin_map: dict[str, str] = {}
         # Connect-net interaction mode
         self.connect_mode: bool = False
         # Map pad_number -> PadGraphicsItem (only when built from real data)
         self._pad_items: dict[str, PadGraphicsItem] = {}
 
         self.signals = _Signals()
+        self._drag_start_pos: Optional[QPointF] = None
 
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
@@ -352,6 +364,23 @@ class FootprintItem(QGraphicsItemGroup):
             self.signals.selected_changed.emit(self.uid, bool(value))
         return super().itemChange(change, value)
 
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        self._drag_start_pos = self.pos()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if self._drag_start_pos is not None:
+            old_pos = self._drag_start_pos
+            new_pos = self.pos()
+            if (old_pos - new_pos).manhattanLength() > 0.01:
+                self.signals.move_finished.emit(
+                    self.uid,
+                    old_pos.x(), old_pos.y(),
+                    new_pos.x(), new_pos.y(),
+                )
+        self._drag_start_pos = None
+
     def set_reference(self, ref: str) -> None:
         self.reference = ref
         self._label.setPlainText(ref)
@@ -419,4 +448,5 @@ class FootprintItem(QGraphicsItemGroup):
             "rotation": self.rotation_deg,
             "layer": self.layer,
             "pad_nets": dict(self.pad_nets),
+            "pin_map": dict(self.pin_map),
         }

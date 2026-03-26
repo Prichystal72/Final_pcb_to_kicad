@@ -184,6 +184,7 @@ class PinData:
     length: float
     direction: float
     electrical_type: str
+    unit: int = 0
 
 
 @dataclass
@@ -192,11 +193,13 @@ class SymbolGraphicRect:
     y1: float
     x2: float
     y2: float
+    unit: int = 0
 
 
 @dataclass
 class SymbolGraphicLine:
     points: list[tuple[float, float]]
+    unit: int = 0
 
 
 @dataclass
@@ -204,6 +207,7 @@ class SymbolGraphicCircle:
     cx: float
     cy: float
     radius: float
+    unit: int = 0
 
 
 @dataclass
@@ -388,14 +392,29 @@ def parse_symbol_library(path: Path) -> list[SymbolData]:
                     desc = pv
         pins, rects, polys, circs = [], [], [], []
         for sub_sym in find_all(sym_node, "symbol"):
+            # Extract unit number from sub-symbol name (e.g. "74HC00_2_1" → 2)
+            sub_name = str(sub_sym[1]) if len(sub_sym) > 1 else ""
+            unit_num = 0
+            if sub_name.startswith(sym_name + "_"):
+                parts = sub_name[len(sym_name) + 1:].split("_")
+                if parts and parts[0].isdigit():
+                    unit_num = int(parts[0])
             for p in find_all(sub_sym, "pin"):
-                pins.append(_parse_sym_pin(p))
+                pd = _parse_sym_pin(p)
+                pd.unit = unit_num
+                pins.append(pd)
             for r in find_all(sub_sym, "rectangle"):
-                rects.append(_parse_sym_rect(r))
+                rd = _parse_sym_rect(r)
+                rd.unit = unit_num
+                rects.append(rd)
             for pl in find_all(sub_sym, "polyline"):
-                polys.append(_parse_sym_polyline(pl))
+                pld = _parse_sym_polyline(pl)
+                pld.unit = unit_num
+                polys.append(pld)
             for c in find_all(sub_sym, "circle"):
-                circs.append(_parse_sym_circle(c))
+                cd = _parse_sym_circle(c)
+                cd.unit = unit_num
+                circs.append(cd)
         for p in find_all(sym_node, "pin"):
             pins.append(_parse_sym_pin(p))
         for r in find_all(sym_node, "rectangle"):
